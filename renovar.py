@@ -44,8 +44,8 @@ def check_active():
             exp = datetime.fromtimestamp(int(info.get('exp_date', 0)))
             remaining = (exp - datetime.now()).total_seconds()
             log(f"Conta '{user}' ainda ATIVA. Restam {remaining/60:.0f} min (expira às {exp.strftime('%H:%M:%S')})")
-            # Se ainda faltam mais de 2 horas (7200s), não precisa gerar outro teste
-            if remaining > 7200:
+            # Se ainda faltam mais de 5 horas (18000s), foi gerado há pouco tempo
+            if remaining > 18000:
                 return True
         return False
     except Exception as e:
