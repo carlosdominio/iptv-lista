@@ -160,11 +160,14 @@ def read_email_credentials(auth_token, max_attempts=12):
                 pass_m = re.search(r'(?:Senha|Password)\s*[:\-]?\s*(\w+)', clean, re.IGNORECASE)
                 server_m = re.search(r'(?:Servidor|Server)\s*[:\-]?\s*(https?://\S+)', clean, re.IGNORECASE)
 
+                m3u_m = re.search(r'(https?://\S+/playlist/\d+/\S+/m3u_plus)', clean, re.IGNORECASE)
+
                 if user_m and pass_m:
                     creds = {
                         'username': user_m.group(1),
                         'password': pass_m.group(1),
                         'server': server_m.group(1) if server_m else 'http://drd33.com',
+                        'm3u_url': m3u_m.group(1) if m3u_m else f"http://drd33.com/playlist/{user_m.group(1)}/{pass_m.group(1)}/m3u_plus",
                         'updated_at': datetime.utcnow().isoformat() + 'Z'
                     }
                     log(f"Credenciais obtidas com sucesso: Usuário={creds['username']}")
@@ -197,50 +200,51 @@ def wait_for_account_active(username, password, server="http://drd33.com", max_w
     log("Aviso: Tempo limite de ativação esgotado, tentando download direto...")
     return False
 
-def download_and_save_streaming(username, password, server="http://drd33.com"):
+def download_and_save_streaming(username, password, server="http://drd33.com", m3u_url=None):
     """Baixa a playlist via streaming com verificação de ativação prévia"""
     wait_for_account_active(username, password, server)
 
-    urls = [
-        f'{server}/playlist/{username}/{password}/m3u_plus',
-        f'{server}/get.php?username={username}&password={password}&type=m3u_plus&output=ts'
-    ]
+    target_url = m3u_url or f'{server}/playlist/{username}/{password}/m3u_plus'
+    headers = {
+        'User-Agent': UA,
+        'Accept': '*/*',
+        'Connection': 'keep-alive'
+    }
 
     for attempt in range(4):
-        for url in urls:
-            try:
-                log(f"Baixando canais via streaming (tentativa {attempt+1})...")
-                req = urllib.request.Request(url, headers={'User-Agent': UA})
-                count_br = 0
-                count_all = 0
+        try:
+            log(f"Baixando canais via streaming (tentativa {attempt+1})...")
+            req = urllib.request.Request(target_url, headers=headers)
+            count_br = 0
+            count_all = 0
 
-                with urllib.request.urlopen(req, timeout=90) as response:
-                    with open('canais_brasil.m3u', 'w', encoding='utf-8') as f_br, open('canais.m3u', 'w', encoding='utf-8') as f_all:
-                        f_br.write('#EXTM3U\n')
-                        f_all.write('#EXTM3U\n')
+            with urllib.request.urlopen(req, timeout=90) as response:
+                with open('canais_brasil.m3u', 'w', encoding='utf-8') as f_br, open('canais.m3u', 'w', encoding='utf-8') as f_all:
+                    f_br.write('#EXTM3U\n')
+                    f_all.write('#EXTM3U\n')
 
-                        current_header = None
-                        for raw_line in response:
-                            line = raw_line.decode('utf-8', errors='ignore').strip()
-                            if line.startswith('#EXTINF:'):
-                                current_header = line
-                            elif line.startswith('http') and current_header:
-                                if '/series/' not in line and '/movie/' not in line:
-                                    f_all.write(current_header + '\n' + line + '\n')
-                                    count_all += 1
-                                    is_foreign = any(f'Canais | {k}' in current_header or f'Canais |  {k}' in current_header for k in FOREIGN_GROUPS)
-                                    if not is_foreign:
-                                        f_br.write(current_header + '\n' + line + '\n')
-                                        count_br += 1
-                                current_header = None
+                    current_header = None
+                    for raw_line in response:
+                        line = raw_line.decode('utf-8', errors='ignore').strip()
+                        if line.startswith('#EXTINF:'):
+                            current_header = line
+                        elif line.startswith('http') and current_header:
+                            if '/series/' not in line and '/movie/' not in line:
+                                f_all.write(current_header + '\n' + line + '\n')
+                                count_all += 1
+                                is_foreign = any(f'Canais | {k}' in current_header or f'Canais |  {k}' in current_header for k in FOREIGN_GROUPS)
+                                if not is_foreign:
+                                    f_br.write(current_header + '\n' + line + '\n')
+                                    count_br += 1
+                            current_header = None
 
-                if count_all > 100:
-                    log(f"✅ canais_brasil.m3u salvo com sucesso ({count_br} canais)")
-                    log(f"✅ canais.m3u salvo com sucesso ({count_all} canais)")
-                    return
-            except Exception as e:
-                log(f"Aviso no download da playlist ({e}). Tentando próxima opção...")
-                time.sleep(4)
+            if count_all > 100:
+                log(f"✅ canais_brasil.m3u salvo com sucesso ({count_br} canais)")
+                log(f"✅ canais.m3u salvo com sucesso ({count_all} canais)")
+                return
+        except Exception as e:
+            log(f"Aviso no download da playlist ({e}). Aguardando 5s para tentar novamente...")
+            time.sleep(5)
 
     raise Exception("Não foi possível baixar a playlist após várias tentativas.")
 
@@ -286,7 +290,7 @@ def main(force=False):
     with open('creds.json', 'w', encoding='utf-8') as f:
         json.dump(creds, f, indent=2)
 
-    download_and_save_streaming(creds['username'], creds['password'], creds['server'])
+    download_and_save_streaming(creds['username'], creds['password'], creds['server'], creds.get('m3u_url'))
     sync_to_github()
     log("=== Processo Finalizado com Sucesso ===")
 
