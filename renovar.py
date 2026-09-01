@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
-Renovador Automático IPTV para GitHub Actions.
-Gera credenciais de teste gratuitas, baixa o stream e atualiza as listas M3U no repositório.
+Renovador Automático IPTV para Nuvem (Render / Docker / VPS).
+Gera credenciais de teste gratuitas, baixa o stream e atualiza as listas M3U.
+Possui verificação de conta ativa e proteção contra rate limit (429).
 """
 
 import urllib.request, urllib.parse, http.cookiejar
@@ -21,33 +22,71 @@ FOREIGN_GROUPS = [
 def log(msg):
     print(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}")
 
+def check_active():
+    """Verifica se já temos credenciais válidas e ativas no servidor"""
+    if not os.path.exists('creds.json'):
+        return False
+    try:
+        with open('creds.json') as f:
+            creds = json.load(f)
+        user = creds.get('username')
+        pwd = creds.get('password')
+        server = creds.get('server', 'http://drd33.com')
+        if not user or not pwd:
+            return False
+
+        url = f'{server}/player_api.php?username={user}&password={pwd}'
+        req = urllib.request.Request(url, headers={'User-Agent': UA})
+        res = urllib.request.urlopen(req, timeout=10)
+        data = json.loads(res.read().decode('utf-8', errors='ignore'))
+        info = data.get('user_info', {})
+        if info.get('status') == 'Active':
+            exp = datetime.fromtimestamp(int(info.get('exp_date', 0)))
+            remaining = (exp - datetime.now()).total_seconds()
+            log(f"Conta '{user}' ainda ATIVA. Expira em {remaining/60:.0f} min ({exp.strftime('%H:%M:%S')})")
+            # Se ainda faltam mais de 15 minutos, não precisa gerar outro teste
+            if remaining > 900:
+                return True
+        return False
+    except Exception as e:
+        log(f"Erro ao verificar conta existente: {e}")
+        return False
+
 def get_temp_email():
     log("Criando caixa de e-mail temporária...")
-    req = urllib.request.Request('https://api.mail.tm/domains', headers={'Accept': 'application/ld+json'})
-    data = json.loads(urllib.request.urlopen(req, timeout=10).read().decode())
-    if isinstance(data, list):
-        domains = [d['domain'] for d in data if isinstance(d, dict)]
-    else:
-        members = data.get('hydra:member', data.get('member', []))
-        domains = [d['domain'] for d in members]
-    domain = domains[0]
+    # Tenta com retry se der 429
+    for attempt in range(3):
+        try:
+            req = urllib.request.Request('https://api.mail.tm/domains', headers={'Accept': 'application/ld+json'})
+            data = json.loads(urllib.request.urlopen(req, timeout=10).read().decode())
+            if isinstance(data, list):
+                domains = [d['domain'] for d in data if isinstance(d, dict)]
+            else:
+                members = data.get('hydra:member', data.get('member', []))
+                domains = [d['domain'] for d in members]
+            domain = domains[0]
 
-    username = f'iptv{random.randint(10000, 99999)}'
-    email = f'{username}@{domain}'
-    password = f'Pass{random.randint(1000, 9999)}!Auto'
+            username = f'iptv{random.randint(10000, 99999)}'
+            email = f'{username}@{domain}'
+            password = f'Pass{random.randint(1000, 9999)}!Auto'
 
-    create_data = json.dumps({"address": email, "password": password}).encode()
-    req = urllib.request.Request('https://api.mail.tm/accounts', data=create_data,
-        headers={'Content-Type': 'application/json', 'Accept': 'application/ld+json'})
-    urllib.request.urlopen(req, timeout=10)
+            create_data = json.dumps({"address": email, "password": password}).encode()
+            req = urllib.request.Request('https://api.mail.tm/accounts', data=create_data,
+                headers={'Content-Type': 'application/json', 'Accept': 'application/ld+json'})
+            urllib.request.urlopen(req, timeout=10)
 
-    login_data = json.dumps({"address": email, "password": password}).encode()
-    req = urllib.request.Request('https://api.mail.tm/token', data=login_data,
-        headers={'Content-Type': 'application/json', 'Accept': 'application/json'})
-    tok = json.loads(urllib.request.urlopen(req, timeout=10).read().decode())
+            login_data = json.dumps({"address": email, "password": password}).encode()
+            req = urllib.request.Request('https://api.mail.tm/token', data=login_data,
+                headers={'Content-Type': 'application/json', 'Accept': 'application/json'})
+            tok = json.loads(urllib.request.urlopen(req, timeout=10).read().decode())
 
-    log(f"E-mail gerado com sucesso: {email}")
-    return email, tok['token']
+            log(f"E-mail gerado: {email}")
+            return email, tok['token']
+        except Exception as e:
+            log(f"Tentativa {attempt+1} ao obter e-mail falhou ({e}). Aguardando 10s...")
+            time.sleep(10)
+
+    raise Exception("Falha ao gerar e-mail temporário após várias tentativas.")
 
 def generate_test(temp_email):
     log("Enviando requisição de geração de teste...")
@@ -178,8 +217,13 @@ def download_and_save(username, password, server="http://drd33.com"):
             f.write(h + '\n' + u + '\n')
     log(f"canais.m3u salvo ({len(all_live)} canais)")
 
-def main():
+def main(force=False):
     log("=== Início do Processo de Auto-Renovação ===")
+    
+    if not force and check_active():
+        log("✅ As credenciais atuais já estão válidas e ativas. Nada a fazer.")
+        return
+
     email, token = get_temp_email()
     generate_test(email)
     creds = read_email_credentials(token)
@@ -191,4 +235,5 @@ def main():
     log("=== Processo Finalizado com Sucesso ===")
 
 if __name__ == '__main__':
-    main()
+    force_arg = '--force' in sys.argv
+    main(force=force_arg)
