@@ -21,7 +21,7 @@ def home():
         "status": "online",
         "servico": "Auto-Renovador IPTV na Nuvem",
         "usuario_atual": creds.get("username", "N/A"),
-        "atualizado_em": creds.get("updated_at", "N/A"),
+        "atualizado_em": creds.get("updated_at") or creds.get("generated_at") or "N/A",
         "links": {
             "canais_brasil": "/canais_brasil.m3u",
             "canais_todos": "/canais.m3u",
