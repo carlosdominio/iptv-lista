@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
-Renovador Automático IPTV Ultra-Otimizado para Nuvem (Baixo uso de memória e CPU).
+Renovador Automático IPTV Ultra-Otimizado para Nuvem.
 Processa as playlists via streaming linha por linha (usa menos de 10MB de RAM).
+Possui retry automático, sincronização de banco de dados e proteção contra duplicidade.
 """
 
 import urllib.request, urllib.parse, http.cookiejar
@@ -42,13 +43,13 @@ def check_active():
         if info.get('status') == 'Active':
             exp = datetime.fromtimestamp(int(info.get('exp_date', 0)))
             remaining = (exp - datetime.now()).total_seconds()
-            log(f"Conta '{user}' ativa. Restam {remaining/60:.0f} min (expira às {exp.strftime('%H:%M:%S')})")
-            # Se ainda restam mais de 3.5 horas, a conta está ótima
-            if remaining > 12600:
+            log(f"Conta '{user}' ainda ATIVA. Restam {remaining/60:.0f} min (expira às {exp.strftime('%H:%M:%S')})")
+            # Se ainda faltam mais de 2 horas (7200s), não precisa gerar outro teste
+            if remaining > 7200:
                 return True
         return False
     except Exception as e:
-        log(f"Aviso ao verificar conta: {e}")
+        log(f"Conta anterior expirada ou inacessivel ({e}). Gerando nova...")
         return False
 
 def get_temp_email():
@@ -77,10 +78,10 @@ def get_temp_email():
             log(f"E-mail gerado: {email}")
             return email, tok['token']
         except Exception as e:
-            log(f"Tentativa {attempt+1} ao obter e-mail falhou ({e}). Aguardando 6s...")
+            log(f"Tentativa {attempt+1} ao obter e-mail: {e}. Aguardando 6s...")
             time.sleep(6)
 
-    raise Exception("Falha ao gerar e-mail temporário após tentativas.")
+    raise Exception("Falha ao obter e-mail temporário após várias tentativas.")
 
 def generate_test(temp_email):
     log("Enviando requisição de geração de teste...")
@@ -166,7 +167,7 @@ def read_email_credentials(auth_token, max_attempts=12):
                         'server': server_m.group(1) if server_m else 'http://drd33.com',
                         'updated_at': datetime.utcnow().isoformat() + 'Z'
                     }
-                    log(f"Credenciais obtidas: Usuário={creds['username']}")
+                    log(f"Credenciais obtidas com sucesso: Usuário={creds['username']}")
                     return creds
             log(f"Tentativa {attempt+1}/{max_attempts} - aguardando e-mail...")
         except Exception as e:
@@ -178,36 +179,47 @@ def read_email_credentials(auth_token, max_attempts=12):
     raise Exception("Tempo limite esgotado sem receber e-mail.")
 
 def download_and_save_streaming(username, password, server="http://drd33.com"):
-    """Baixa a playlist via streaming direto para o disco, sem carregar 74MB na memória RAM"""
-    log("Baixando playlist via streaming otimizado...")
+    """Baixa a playlist via streaming com retentativas se o servidor demorar para sincronizar"""
+    log("Aguardando 4s para sincronização no servidor IPTV...")
+    time.sleep(4)
+
     url = f'{server}/playlist/{username}/{password}/m3u_plus'
-    req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
     
-    count_br = 0
-    count_all = 0
+    for attempt in range(3):
+        try:
+            log(f"Baixando playlist via streaming (tentativa {attempt+1})...")
+            req = urllib.request.Request(url, headers={'User-Agent': UA})
+            count_br = 0
+            count_all = 0
 
-    with urllib.request.urlopen(req, timeout=90) as response:
-        with open('canais_brasil.m3u', 'w', encoding='utf-8') as f_br, open('canais.m3u', 'w', encoding='utf-8') as f_all:
-            f_br.write('#EXTM3U\n')
-            f_all.write('#EXTM3U\n')
-            
-            current_header = None
-            for raw_line in response:
-                line = raw_line.decode('utf-8', errors='ignore').strip()
-                if line.startswith('#EXTINF:'):
-                    current_header = line
-                elif line.startswith('http') and current_header:
-                    if '/series/' not in line and '/movie/' not in line:
-                        f_all.write(current_header + '\n' + line + '\n')
-                        count_all += 1
-                        is_foreign = any(f'Canais | {k}' in current_header or f'Canais |  {k}' in current_header for k in FOREIGN_GROUPS)
-                        if not is_foreign:
-                            f_br.write(current_header + '\n' + line + '\n')
-                            count_br += 1
+            with urllib.request.urlopen(req, timeout=90) as response:
+                with open('canais_brasil.m3u', 'w', encoding='utf-8') as f_br, open('canais.m3u', 'w', encoding='utf-8') as f_all:
+                    f_br.write('#EXTM3U\n')
+                    f_all.write('#EXTM3U\n')
+                    
                     current_header = None
+                    for raw_line in response:
+                        line = raw_line.decode('utf-8', errors='ignore').strip()
+                        if line.startswith('#EXTINF:'):
+                            current_header = line
+                        elif line.startswith('http') and current_header:
+                            if '/series/' not in line and '/movie/' not in line:
+                                f_all.write(current_header + '\n' + line + '\n')
+                                count_all += 1
+                                is_foreign = any(f'Canais | {k}' in current_header or f'Canais |  {k}' in current_header for k in FOREIGN_GROUPS)
+                                if not is_foreign:
+                                    f_br.write(current_header + '\n' + line + '\n')
+                                    count_br += 1
+                            current_header = None
 
-    log(f"canais_brasil.m3u salvo ({count_br} canais)")
-    log(f"canais.m3u salvo ({count_all} canais)")
+            log(f"canais_brasil.m3u salvo ({count_br} canais)")
+            log(f"canais.m3u salvo ({count_all} canais)")
+            return
+        except urllib.error.HTTPError as e:
+            log(f"Erro HTTP {e.code} ao baixar playlist. Aguardando 5s para tentar novamente...")
+            time.sleep(5)
+
+    raise Exception("Não foi possível baixar a playlist após 3 tentativas.")
 
 def main(force=False):
     log("=== Início do Processo de Auto-Renovação ===")

@@ -5,22 +5,8 @@ import renovar
 
 app = Flask(__name__)
 
+IS_RUNNING = False
 LOCK = threading.Lock()
-
-def auto_loop():
-    """Loop em background para renovar a cada 4 horas com delay inicial"""
-    time.sleep(10)  # Aguarda 10s para o servidor web subir primeiro sem travar o worker
-    while True:
-        try:
-            print("[Cloud Daemon] Checando renovação IPTV...", flush=True)
-            with LOCK:
-                renovar.main()
-        except Exception as e:
-            print(f"[Cloud Daemon Error] {e}", flush=True)
-        time.sleep(4 * 3600)
-
-# Iniciar thread de renovação em background
-threading.Thread(target=auto_loop, daemon=True).start()
 
 @app.route('/')
 def home():
@@ -46,16 +32,26 @@ def home():
 @app.route('/cron')
 @app.route('/renovar')
 def trigger_cron():
-    """Endpoint chamado por cron-job.org ou manualmente para forçar renovação"""
-    def run_sync():
+    """Endpoint chamado pelo cron-job.org a cada 4 horas"""
+    global IS_RUNNING
+    if IS_RUNNING:
+        return jsonify({"status": "busy", "msg": "Uma renovacao ja esta em andamento no momento."}), 200
+
+    def run_worker():
+        global IS_RUNNING
         with LOCK:
-            renovar.main(force=False)
-    
-    # Executa de forma assíncrona ou rápida para responder 200 ao cron-job imediatamente
-    threading.Thread(target=run_sync).start()
+            IS_RUNNING = True
+            try:
+                renovar.main(force=False)
+            except Exception as e:
+                print(f"[Cron Error] {e}", flush=True)
+            finally:
+                IS_RUNNING = False
+
+    threading.Thread(target=run_worker, daemon=True).start()
     return jsonify({
         "status": "success",
-        "msg": "Comando de verificação/renovação recebido e em execução na nuvem!"
+        "msg": "Verificacao/renovacao iniciada com sucesso!"
     }), 200
 
 @app.route('/canais_brasil.m3u')
