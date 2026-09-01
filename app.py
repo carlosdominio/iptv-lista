@@ -25,7 +25,8 @@ def home():
         "links": {
             "canais_brasil": "/canais_brasil.m3u",
             "canais_todos": "/canais.m3u",
-            "forcar_renovacao": "/cron"
+            "forcar_renovacao": "/cron",
+            "guia_epg": "/epg.xml"
         }
     })
 
@@ -68,6 +69,22 @@ def get_canais():
     with open('canais.m3u', 'r', encoding='utf-8', errors='ignore') as f:
         content = f.read()
     return Response(content, mimetype='audio/x-mpegurl', headers={"Content-Disposition": "inline; filename=canais.m3u"})
+
+
+@app.route('/epg.xml')
+def get_epg():
+    creds = {}
+    if os.path.exists('creds.json'):
+        try:
+            with open('creds.json') as f:
+                creds = json.load(f)
+        except:
+            pass
+    if creds.get('username') and creds.get('password'):
+        from flask import redirect
+        epg_url = f"http://drd33.com/xmltv.php?username={creds['username']}&password={creds['password']}"
+        return redirect(epg_url, code=302)
+    return "Nenhuma conta ativa para gerar EPG.", 404
 
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 8080))

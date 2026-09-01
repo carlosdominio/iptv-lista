@@ -238,8 +238,9 @@ def download_and_save_streaming(username, password, server="http://drd33.com", m
 
             with urllib.request.urlopen(req, timeout=90) as response:
                 with open('canais_brasil.m3u', 'w', encoding='utf-8') as f_br, open('canais.m3u', 'w', encoding='utf-8') as f_all:
-                    f_br.write('#EXTM3U\n')
-                    f_all.write('#EXTM3U\n')
+                    epg_url = f'{server}/xmltv.php?username={username}&password={password}'
+                    f_br.write(f'#EXTM3U url-tvg="{epg_url}" x-tvg-url="{epg_url}"\n')
+                    f_all.write(f'#EXTM3U url-tvg="{epg_url}" x-tvg-url="{epg_url}"\n')
 
                     current_header = None
                     for raw_line in response:
