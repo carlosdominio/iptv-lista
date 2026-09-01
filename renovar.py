@@ -198,25 +198,11 @@ def read_email_credentials(auth_token, max_attempts=12):
 
     raise Exception("Tempo limite esgotado sem receber e-mail.")
 
-def wait_for_account_active(username, password, server="http://drd33.com", max_wait=120):
-    """Aguarda o servidor IPTV propagar e ativar a conta no banco de dados (leva de 40 a 60s)"""
-    log(f"Aguardando propagacao e ativacao da conta '{username}' no servidor IPTV...")
-    start = time.time()
-    while time.time() - start < max_wait:
-        try:
-            url = f'{server}/player_api.php?username={username}&password={password}'
-            req = urllib.request.Request(url, headers={'User-Agent': UA})
-            with urllib.request.urlopen(req, timeout=10) as r:
-                data = json.loads(r.read().decode('utf-8', errors='ignore'))
-                if data.get('user_info', {}).get('status') == 'Active':
-                    elapsed = int(time.time() - start)
-                    log(f"✅ Conta '{username}' confirmada e 100% ATIVA no servidor IPTV ({elapsed}s decorridos)!")
-                    return True
-        except Exception as e:
-            pass
-        time.sleep(5)
-    log("Aviso: Tempo limite de confirmacao esgotado, prosseguindo com tentativas de download...")
-    return False
+def wait_for_account_active(username, password, server, max_wait=120):
+    log("Aguardando 30s para garantir a propagacao no IPTV (Sem pingar a API para evitar bloqueio 403)...")
+    import time
+    time.sleep(30)
+    return True
 
 def download_and_save_streaming(username, password, server="http://drd33.com", m3u_url=None):
     """Baixa a playlist via streaming apos confirmacao de ativacao"""

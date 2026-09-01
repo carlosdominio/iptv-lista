@@ -54,21 +54,39 @@ def trigger_cron():
 
 @app.route('/canais_brasil.m3u')
 def get_canais_brasil():
-    if not os.path.exists('canais_brasil.m3u'):
-        with LOCK:
-            renovar.main()
-    with open('canais_brasil.m3u', 'r', encoding='utf-8', errors='ignore') as f:
-        content = f.read()
-    return Response(content, mimetype='audio/x-mpegurl', headers={"Content-Disposition": "inline; filename=canais_brasil.m3u"})
+    creds = {}
+    import json, os
+    if os.path.exists('creds.json'):
+        try:
+            with open('creds.json') as f:
+                creds = json.load(f)
+        except:
+            pass
+    m3u_url = creds.get('m3u_url')
+    if not m3u_url and creds.get('username'):
+        m3u_url = f"http://drd33.com/playlist/{creds['username']}/{creds['password']}/m3u_plus"
+    if m3u_url:
+        from flask import redirect
+        return redirect(m3u_url, code=302)
+    return "Lista não gerada ainda.", 404
 
 @app.route('/canais.m3u')
 def get_canais():
-    if not os.path.exists('canais.m3u'):
-        with LOCK:
-            renovar.main()
-    with open('canais.m3u', 'r', encoding='utf-8', errors='ignore') as f:
-        content = f.read()
-    return Response(content, mimetype='audio/x-mpegurl', headers={"Content-Disposition": "inline; filename=canais.m3u"})
+    creds = {}
+    import json, os
+    if os.path.exists('creds.json'):
+        try:
+            with open('creds.json') as f:
+                creds = json.load(f)
+        except:
+            pass
+    m3u_url = creds.get('m3u_url')
+    if not m3u_url and creds.get('username'):
+        m3u_url = f"http://drd33.com/playlist/{creds['username']}/{creds['password']}/m3u_plus"
+    if m3u_url:
+        from flask import redirect
+        return redirect(m3u_url, code=302)
+    return "Lista não gerada ainda.", 404
 
 
 @app.route('/epg.xml')
