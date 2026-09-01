@@ -178,48 +178,71 @@ def read_email_credentials(auth_token, max_attempts=12):
 
     raise Exception("Tempo limite esgotado sem receber e-mail.")
 
-def download_and_save_streaming(username, password, server="http://drd33.com"):
-    """Baixa a playlist via streaming com retentativas se o servidor demorar para sincronizar"""
-    log("Aguardando 4s para sincronização no servidor IPTV...")
-    time.sleep(4)
-
-    url = f'{server}/playlist/{username}/{password}/m3u_plus'
-    
-    for attempt in range(3):
+def wait_for_account_active(username, password, server="http://drd33.com", max_wait=30):
+    """Aguarda o servidor IPTV propagar e ativar a conta no banco de dados"""
+    log("Aguardando confirmação de ativação no servidor IPTV...")
+    start = time.time()
+    while time.time() - start < max_wait:
         try:
-            log(f"Baixando playlist via streaming (tentativa {attempt+1})...")
+            url = f'{server}/player_api.php?username={username}&password={password}'
             req = urllib.request.Request(url, headers={'User-Agent': UA})
-            count_br = 0
-            count_all = 0
+            with urllib.request.urlopen(req, timeout=10) as r:
+                data = json.loads(r.read().decode('utf-8', errors='ignore'))
+                if data.get('user_info', {}).get('status') == 'Active':
+                    log(f"✅ Conta '{username}' confirmada e ATIVA no servidor IPTV!")
+                    return True
+        except Exception as e:
+            pass
+        time.sleep(3)
+    log("Aviso: Tempo limite de ativação esgotado, tentando download direto...")
+    return False
 
-            with urllib.request.urlopen(req, timeout=90) as response:
-                with open('canais_brasil.m3u', 'w', encoding='utf-8') as f_br, open('canais.m3u', 'w', encoding='utf-8') as f_all:
-                    f_br.write('#EXTM3U\n')
-                    f_all.write('#EXTM3U\n')
-                    
-                    current_header = None
-                    for raw_line in response:
-                        line = raw_line.decode('utf-8', errors='ignore').strip()
-                        if line.startswith('#EXTINF:'):
-                            current_header = line
-                        elif line.startswith('http') and current_header:
-                            if '/series/' not in line and '/movie/' not in line:
-                                f_all.write(current_header + '\n' + line + '\n')
-                                count_all += 1
-                                is_foreign = any(f'Canais | {k}' in current_header or f'Canais |  {k}' in current_header for k in FOREIGN_GROUPS)
-                                if not is_foreign:
-                                    f_br.write(current_header + '\n' + line + '\n')
-                                    count_br += 1
-                            current_header = None
+def download_and_save_streaming(username, password, server="http://drd33.com"):
+    """Baixa a playlist via streaming com verificação de ativação prévia"""
+    wait_for_account_active(username, password, server)
 
-            log(f"canais_brasil.m3u salvo ({count_br} canais)")
-            log(f"canais.m3u salvo ({count_all} canais)")
-            return
-        except urllib.error.HTTPError as e:
-            log(f"Erro HTTP {e.code} ao baixar playlist. Aguardando 5s para tentar novamente...")
-            time.sleep(5)
+    urls = [
+        f'{server}/playlist/{username}/{password}/m3u_plus',
+        f'{server}/get.php?username={username}&password={password}&type=m3u_plus&output=ts'
+    ]
 
-    raise Exception("Não foi possível baixar a playlist após 3 tentativas.")
+    for attempt in range(4):
+        for url in urls:
+            try:
+                log(f"Baixando canais via streaming (tentativa {attempt+1})...")
+                req = urllib.request.Request(url, headers={'User-Agent': UA})
+                count_br = 0
+                count_all = 0
+
+                with urllib.request.urlopen(req, timeout=90) as response:
+                    with open('canais_brasil.m3u', 'w', encoding='utf-8') as f_br, open('canais.m3u', 'w', encoding='utf-8') as f_all:
+                        f_br.write('#EXTM3U\n')
+                        f_all.write('#EXTM3U\n')
+
+                        current_header = None
+                        for raw_line in response:
+                            line = raw_line.decode('utf-8', errors='ignore').strip()
+                            if line.startswith('#EXTINF:'):
+                                current_header = line
+                            elif line.startswith('http') and current_header:
+                                if '/series/' not in line and '/movie/' not in line:
+                                    f_all.write(current_header + '\n' + line + '\n')
+                                    count_all += 1
+                                    is_foreign = any(f'Canais | {k}' in current_header or f'Canais |  {k}' in current_header for k in FOREIGN_GROUPS)
+                                    if not is_foreign:
+                                        f_br.write(current_header + '\n' + line + '\n')
+                                        count_br += 1
+                                current_header = None
+
+                if count_all > 100:
+                    log(f"✅ canais_brasil.m3u salvo com sucesso ({count_br} canais)")
+                    log(f"✅ canais.m3u salvo com sucesso ({count_all} canais)")
+                    return
+            except Exception as e:
+                log(f"Aviso no download da playlist ({e}). Tentando próxima opção...")
+                time.sleep(4)
+
+    raise Exception("Não foi possível baixar a playlist após várias tentativas.")
 
 def main(force=False):
     log("=== Início do Processo de Auto-Renovação ===")
