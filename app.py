@@ -10,14 +10,14 @@ LAST_RENEWAL = None
 LOCK = threading.Lock()
 
 def auto_loop():
-    """Loop em background para renovar a cada 5 horas"""
+    """Loop em background para renovar a cada 4 horas"""
     while True:
         try:
             print("[Cloud Daemon] Verificando/renovando lista IPTV...")
             renovar.main()
         except Exception as e:
             print(f"[Cloud Daemon Error] {e}")
-        time.sleep(5 * 3600)
+        time.sleep(4 * 3600)
 
 # Iniciar thread de renovação em background
 threading.Thread(target=auto_loop, daemon=True).start()
