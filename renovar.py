@@ -198,9 +198,9 @@ def read_email_credentials(auth_token, max_attempts=12):
 
     raise Exception("Tempo limite esgotado sem receber e-mail.")
 
-def wait_for_account_active(username, password, server="http://drd33.com", max_wait=30):
-    """Aguarda o servidor IPTV propagar e ativar a conta no banco de dados"""
-    log("Aguardando confirmação de ativação no servidor IPTV...")
+def wait_for_account_active(username, password, server="http://drd33.com", max_wait=120):
+    """Aguarda o servidor IPTV propagar e ativar a conta no banco de dados (leva de 40 a 60s)"""
+    log(f"Aguardando propagacao e ativacao da conta '{username}' no servidor IPTV...")
     start = time.time()
     while time.time() - start < max_wait:
         try:
@@ -209,17 +209,18 @@ def wait_for_account_active(username, password, server="http://drd33.com", max_w
             with urllib.request.urlopen(req, timeout=10) as r:
                 data = json.loads(r.read().decode('utf-8', errors='ignore'))
                 if data.get('user_info', {}).get('status') == 'Active':
-                    log(f"✅ Conta '{username}' confirmada e ATIVA no servidor IPTV!")
+                    elapsed = int(time.time() - start)
+                    log(f"✅ Conta '{username}' confirmada e 100% ATIVA no servidor IPTV ({elapsed}s decorridos)!")
                     return True
         except Exception as e:
             pass
-        time.sleep(3)
-    log("Aviso: Tempo limite de ativação esgotado, tentando download direto...")
+        time.sleep(5)
+    log("Aviso: Tempo limite de confirmacao esgotado, prosseguindo com tentativas de download...")
     return False
 
 def download_and_save_streaming(username, password, server="http://drd33.com", m3u_url=None):
-    """Baixa a playlist via streaming com verificação de ativação prévia"""
-    wait_for_account_active(username, password, server)
+    """Baixa a playlist via streaming apos confirmacao de ativacao"""
+    wait_for_account_active(username, password, server, max_wait=120)
 
     target_url = m3u_url or f'{server}/playlist/{username}/{password}/m3u_plus'
     headers = {
@@ -228,9 +229,9 @@ def download_and_save_streaming(username, password, server="http://drd33.com", m
         'Connection': 'keep-alive'
     }
 
-    for attempt in range(4):
+    for attempt in range(6):
         try:
-            log(f"Baixando canais via streaming (tentativa {attempt+1})...")
+            log(f"Baixando canais via streaming (tentativa {attempt+1}/6)...")
             req = urllib.request.Request(target_url, headers=headers)
             count_br = 0
             count_all = 0
@@ -260,10 +261,10 @@ def download_and_save_streaming(username, password, server="http://drd33.com", m
                 log(f"✅ canais.m3u salvo com sucesso ({count_all} canais)")
                 return
         except Exception as e:
-            log(f"Aviso no download da playlist ({e}). Aguardando 5s para tentar novamente...")
-            time.sleep(5)
+            log(f"Aviso no download da playlist ({e}). Aguardando 8s para proxima tentativa...")
+            time.sleep(8)
 
-    raise Exception("Não foi possível baixar a playlist após várias tentativas.")
+    raise Exception("Nao foi possivel baixar a playlist apos 6 tentativas.")
 
 def sync_to_github():
     """Faz commit e push dos arquivos atualizados de volta para o repositório GitHub"""
