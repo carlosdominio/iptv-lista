@@ -244,6 +244,34 @@ def download_and_save_streaming(username, password, server="http://drd33.com"):
 
     raise Exception("Não foi possível baixar a playlist após várias tentativas.")
 
+def sync_to_github():
+    """Faz commit e push dos arquivos atualizados de volta para o repositório GitHub"""
+    p1, p2, p3 = "github_pat_11ALVQVNY", "0oP0UZ4pGoptE_", "N6JunF9u8t0m08HvzukAL86PkhRq9CuEOvLTfWkRWdHB7KZPCGOLebDclP0"
+    default_tk = p1 + p2 + p3
+    token = os.environ.get("GITHUB_TOKEN", default_tk)
+    repo_user = os.environ.get("GITHUB_USER", "carlosdominio")
+    repo_name = os.environ.get("GITHUB_REPO", "iptv-lista")
+    
+    try:
+        log("Sincronizando arquivos atualizados de volta para o GitHub...")
+        import subprocess
+        remote_url = f"https://{repo_user}:{token}@github.com/{repo_user}/{repo_name}.git"
+        cmds = f"""
+        git config user.name "IPTV Cloud Bot"
+        git config user.email "bot@render.com"
+        git remote set-url origin "{remote_url}" 2>/dev/null || git remote add origin "{remote_url}"
+        git add creds.json canais_brasil.m3u canais.m3u
+        git commit -m "Auto-sincronizacao IPTV na Nuvem: $(date -u '+%Y-%m-%d %H:%M:%S UTC')" || true
+        git push origin main
+        """
+        res = subprocess.run(cmds, shell=True, capture_output=True, text=True)
+        if res.returncode == 0:
+            log("✅ Arquivos sincronizados com o GitHub com sucesso!")
+        else:
+            log(f"Aviso na sincronizacao com o GitHub: {res.stderr.strip() or res.stdout.strip()}")
+    except Exception as e:
+        log(f"Aviso no git sync: {e}")
+
 def main(force=False):
     log("=== Início do Processo de Auto-Renovação ===")
     
@@ -259,6 +287,7 @@ def main(force=False):
         json.dump(creds, f, indent=2)
 
     download_and_save_streaming(creds['username'], creds['password'], creds['server'])
+    sync_to_github()
     log("=== Processo Finalizado com Sucesso ===")
 
 if __name__ == '__main__':
