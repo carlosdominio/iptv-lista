@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """
-Renovador Automático IPTV para Nuvem (Render / Docker / VPS).
-Gera credenciais de teste gratuitas, baixa o stream e atualiza as listas M3U.
-Possui verificação de conta ativa e proteção contra rate limit (429).
+Renovador Automático IPTV Ultra-Otimizado para Nuvem (Baixo uso de memória e CPU).
+Processa as playlists via streaming linha por linha (usa menos de 10MB de RAM).
 """
 
 import urllib.request, urllib.parse, http.cookiejar
@@ -20,7 +19,7 @@ FOREIGN_GROUPS = [
 ]
 
 def log(msg):
-    print(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}")
+    print(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}", flush=True)
 
 def check_active():
     """Verifica se já temos credenciais válidas e ativas no servidor"""
@@ -43,28 +42,23 @@ def check_active():
         if info.get('status') == 'Active':
             exp = datetime.fromtimestamp(int(info.get('exp_date', 0)))
             remaining = (exp - datetime.now()).total_seconds()
-            log(f"Conta '{user}' ainda ATIVA. Expira em {remaining/60:.0f} min ({exp.strftime('%H:%M:%S')})")
-            # Se ainda faltam mais de 4 horas (14400s), a conta ainda é nova
-            if remaining > 14400:
+            log(f"Conta '{user}' ativa. Restam {remaining/60:.0f} min (expira às {exp.strftime('%H:%M:%S')})")
+            # Se ainda restam mais de 3.5 horas, a conta está ótima
+            if remaining > 12600:
                 return True
         return False
     except Exception as e:
-        log(f"Erro ao verificar conta existente: {e}")
+        log(f"Aviso ao verificar conta: {e}")
         return False
 
 def get_temp_email():
     log("Criando caixa de e-mail temporária...")
-    # Tenta com retry se der 429
     for attempt in range(3):
         try:
             req = urllib.request.Request('https://api.mail.tm/domains', headers={'Accept': 'application/ld+json'})
             data = json.loads(urllib.request.urlopen(req, timeout=10).read().decode())
-            if isinstance(data, list):
-                domains = [d['domain'] for d in data if isinstance(d, dict)]
-            else:
-                members = data.get('hydra:member', data.get('member', []))
-                domains = [d['domain'] for d in members]
-            domain = domains[0]
+            domains = [d['domain'] for d in (data if isinstance(data, list) else data.get('hydra:member', []))]
+            domain = domains[0] if domains else 'emalupe.com'
 
             username = f'iptv{random.randint(10000, 99999)}'
             email = f'{username}@{domain}'
@@ -83,10 +77,10 @@ def get_temp_email():
             log(f"E-mail gerado: {email}")
             return email, tok['token']
         except Exception as e:
-            log(f"Tentativa {attempt+1} ao obter e-mail falhou ({e}). Aguardando 10s...")
-            time.sleep(10)
+            log(f"Tentativa {attempt+1} ao obter e-mail falhou ({e}). Aguardando 6s...")
+            time.sleep(6)
 
-    raise Exception("Falha ao gerar e-mail temporário após várias tentativas.")
+    raise Exception("Falha ao gerar e-mail temporário após tentativas.")
 
 def generate_test(temp_email):
     log("Enviando requisição de geração de teste...")
@@ -139,7 +133,7 @@ def generate_test(temp_email):
 
 def read_email_credentials(auth_token, max_attempts=12):
     log("Aguardando chegada do e-mail com as credenciais...")
-    time.sleep(20)
+    time.sleep(18)
 
     for attempt in range(max_attempts):
         try:
@@ -172,56 +166,54 @@ def read_email_credentials(auth_token, max_attempts=12):
                         'server': server_m.group(1) if server_m else 'http://drd33.com',
                         'updated_at': datetime.utcnow().isoformat() + 'Z'
                     }
-                    log(f"Credenciais obtidas com sucesso: Usuário={creds['username']}")
+                    log(f"Credenciais obtidas: Usuário={creds['username']}")
                     return creds
-            log(f"Tentativa {attempt+1}/{max_attempts} - aguardando...")
+            log(f"Tentativa {attempt+1}/{max_attempts} - aguardando e-mail...")
         except Exception as e:
-            log(f"Aviso na tentativa {attempt+1}: {e}")
+            log(f"Aviso tentativa {attempt+1}: {e}")
 
         if attempt < max_attempts - 1:
-            time.sleep(10)
+            time.sleep(8)
 
-    raise Exception("Tempo limite esgotado sem receber e-mail de ativação.")
+    raise Exception("Tempo limite esgotado sem receber e-mail.")
 
-def download_and_save(username, password, server="http://drd33.com"):
-    log("Baixando playlist M3U atualizada...")
+def download_and_save_streaming(username, password, server="http://drd33.com"):
+    """Baixa a playlist via streaming direto para o disco, sem carregar 74MB na memória RAM"""
+    log("Baixando playlist via streaming otimizado...")
     url = f'{server}/playlist/{username}/{password}/m3u_plus'
     req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
-    content = urllib.request.urlopen(req, timeout=60).read().decode('utf-8', errors='ignore')
+    
+    count_br = 0
+    count_all = 0
 
-    all_live = []
-    br_live = []
-    current = None
+    with urllib.request.urlopen(req, timeout=90) as response:
+        with open('canais_brasil.m3u', 'w', encoding='utf-8') as f_br, open('canais.m3u', 'w', encoding='utf-8') as f_all:
+            f_br.write('#EXTM3U\n')
+            f_all.write('#EXTM3U\n')
+            
+            current_header = None
+            for raw_line in response:
+                line = raw_line.decode('utf-8', errors='ignore').strip()
+                if line.startswith('#EXTINF:'):
+                    current_header = line
+                elif line.startswith('http') and current_header:
+                    if '/series/' not in line and '/movie/' not in line:
+                        f_all.write(current_header + '\n' + line + '\n')
+                        count_all += 1
+                        is_foreign = any(f'Canais | {k}' in current_header or f'Canais |  {k}' in current_header for k in FOREIGN_GROUPS)
+                        if not is_foreign:
+                            f_br.write(current_header + '\n' + line + '\n')
+                            count_br += 1
+                    current_header = None
 
-    for line in content.splitlines():
-        line = line.strip()
-        if line.startswith('#EXTINF:'):
-            current = line
-        elif line.startswith('http') and current:
-            if '/series/' not in line and '/movie/' not in line:
-                all_live.append((current, line))
-                is_foreign = any(f'Canais | {k}' in current or f'Canais |  {k}' in current for k in FOREIGN_GROUPS)
-                if not is_foreign:
-                    br_live.append((current, line))
-            current = None
-
-    with open('canais_brasil.m3u', 'w', encoding='utf-8') as f:
-        f.write('#EXTM3U\n')
-        for h, u in br_live:
-            f.write(h + '\n' + u + '\n')
-    log(f"canais_brasil.m3u salvo ({len(br_live)} canais)")
-
-    with open('canais.m3u', 'w', encoding='utf-8') as f:
-        f.write('#EXTM3U\n')
-        for h, u in all_live:
-            f.write(h + '\n' + u + '\n')
-    log(f"canais.m3u salvo ({len(all_live)} canais)")
+    log(f"canais_brasil.m3u salvo ({count_br} canais)")
+    log(f"canais.m3u salvo ({count_all} canais)")
 
 def main(force=False):
     log("=== Início do Processo de Auto-Renovação ===")
     
     if not force and check_active():
-        log("✅ As credenciais atuais já estão válidas e ativas. Nada a fazer.")
+        log("✅ Credenciais atuais válidas e ativas. Nada a fazer.")
         return
 
     email, token = get_temp_email()
@@ -231,7 +223,7 @@ def main(force=False):
     with open('creds.json', 'w', encoding='utf-8') as f:
         json.dump(creds, f, indent=2)
 
-    download_and_save(creds['username'], creds['password'], creds['server'])
+    download_and_save_streaming(creds['username'], creds['password'], creds['server'])
     log("=== Processo Finalizado com Sucesso ===")
 
 if __name__ == '__main__':

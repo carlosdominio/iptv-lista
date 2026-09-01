@@ -5,18 +5,18 @@ import renovar
 
 app = Flask(__name__)
 
-# Cache global
-LAST_RENEWAL = None
 LOCK = threading.Lock()
 
 def auto_loop():
-    """Loop em background para renovar a cada 4 horas"""
+    """Loop em background para renovar a cada 4 horas com delay inicial"""
+    time.sleep(10)  # Aguarda 10s para o servidor web subir primeiro sem travar o worker
     while True:
         try:
-            print("[Cloud Daemon] Verificando/renovando lista IPTV...")
-            renovar.main()
+            print("[Cloud Daemon] Checando renovação IPTV...", flush=True)
+            with LOCK:
+                renovar.main()
         except Exception as e:
-            print(f"[Cloud Daemon Error] {e}")
+            print(f"[Cloud Daemon Error] {e}", flush=True)
         time.sleep(4 * 3600)
 
 # Iniciar thread de renovação em background
@@ -26,8 +26,11 @@ threading.Thread(target=auto_loop, daemon=True).start()
 def home():
     creds = {}
     if os.path.exists('creds.json'):
-        with open('creds.json') as f:
-            creds = json.load(f)
+        try:
+            with open('creds.json') as f:
+                creds = json.load(f)
+        except:
+            pass
     return jsonify({
         "status": "online",
         "servico": "Auto-Renovador IPTV na Nuvem",
@@ -44,12 +47,16 @@ def home():
 @app.route('/renovar')
 def trigger_cron():
     """Endpoint chamado por cron-job.org ou manualmente para forçar renovação"""
-    with LOCK:
-        try:
-            renovar.main()
-            return jsonify({"status": "success", "msg": "Lista renovada com sucesso!"}), 200
-        except Exception as e:
-            return jsonify({"status": "error", "msg": str(e)}), 500
+    def run_sync():
+        with LOCK:
+            renovar.main(force=False)
+    
+    # Executa de forma assíncrona ou rápida para responder 200 ao cron-job imediatamente
+    threading.Thread(target=run_sync).start()
+    return jsonify({
+        "status": "success",
+        "msg": "Comando de verificação/renovação recebido e em execução na nuvem!"
+    }), 200
 
 @app.route('/canais_brasil.m3u')
 def get_canais_brasil():
