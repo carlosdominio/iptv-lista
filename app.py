@@ -35,7 +35,7 @@ def trigger_cron():
     """Endpoint chamado pelo cron-job.org a cada 4 horas"""
     global IS_RUNNING
     if IS_RUNNING:
-        return jsonify({"status": "busy", "msg": "Uma renovacao ja esta em andamento no momento."}), 200
+        return Response("BUSY", mimetype="text/plain", status=200)
 
     def run_worker():
         global IS_RUNNING
@@ -49,10 +49,7 @@ def trigger_cron():
                 IS_RUNNING = False
 
     threading.Thread(target=run_worker, daemon=True).start()
-    return jsonify({
-        "status": "success",
-        "msg": "Verificacao/renovacao iniciada com sucesso!"
-    }), 200
+    return Response("OK", mimetype="text/plain", status=200)
 
 @app.route('/canais_brasil.m3u')
 def get_canais_brasil():
