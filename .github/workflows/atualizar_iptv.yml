@@ -1,0 +1,34 @@
+name: Auto Renovador IPTV
+
+on:
+  schedule:
+    # Executa a cada 5 horas automaticamente
+    - cron: '0 */5 * * *'
+  workflow_dispatch: # Permite disparar manualmente pelo botão no GitHub
+
+permissions:
+  contents: write
+
+jobs:
+  atualizar:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout do Repositório
+        uses: actions/checkout@v4
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Executar Renovação e Download
+        run: python renovar.py
+
+      - name: Commit e Push das Listas Atualizadas
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action Bot"
+          git add canais_brasil.m3u canais.m3u creds.json
+          git commit -m "Lista IPTV atualizada: $(date -u '+%Y-%m-%d %H:%M:%S UTC')" || exit 0
+          git push
