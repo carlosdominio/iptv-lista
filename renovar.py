@@ -204,54 +204,9 @@ def wait_for_account_active(username, password, server, max_wait=120):
     time.sleep(30)
     return True
 
-def download_and_save_streaming(username, password, server="http://drd33.com", m3u_url=None):
-    """Baixa a playlist via streaming apos confirmacao de ativacao"""
-    wait_for_account_active(username, password, server, max_wait=120)
-
-    target_url = m3u_url or f'{server}/playlist/{username}/{password}/m3u_plus'
-    headers = {
-        'User-Agent': UA,
-        'Accept': '*/*',
-        'Connection': 'keep-alive'
-    }
-
-    for attempt in range(6):
-        try:
-            log(f"Baixando canais via streaming (tentativa {attempt+1}/6)...")
-            req = urllib.request.Request(target_url, headers=headers)
-            count_br = 0
-            count_all = 0
-
-            with urllib.request.urlopen(req, timeout=90) as response:
-                with open('canais_brasil.m3u', 'w', encoding='utf-8') as f_br, open('canais.m3u', 'w', encoding='utf-8') as f_all:
-                    epg_url = f'{server}/xmltv.php?username={username}&password={password}'
-                    f_br.write(f'#EXTM3U url-tvg="{epg_url}" x-tvg-url="{epg_url}"\n')
-                    f_all.write(f'#EXTM3U url-tvg="{epg_url}" x-tvg-url="{epg_url}"\n')
-
-                    current_header = None
-                    for raw_line in response:
-                        line = raw_line.decode('utf-8', errors='ignore').strip()
-                        if line.startswith('#EXTINF:'):
-                            current_header = line
-                        elif line.startswith('http') and current_header:
-                            if '/series/' not in line and '/movie/' not in line:
-                                f_all.write(current_header + '\n' + line + '\n')
-                                count_all += 1
-                                is_foreign = any(f'Canais | {k}' in current_header or f'Canais |  {k}' in current_header for k in FOREIGN_GROUPS)
-                                if not is_foreign:
-                                    f_br.write(current_header + '\n' + line + '\n')
-                                    count_br += 1
-                            current_header = None
-
-            if count_all > 100:
-                log(f"✅ canais_brasil.m3u salvo com sucesso ({count_br} canais)")
-                log(f"✅ canais.m3u salvo com sucesso ({count_all} canais)")
-                return
-        except Exception as e:
-            log(f"Aviso no download da playlist ({e}). Aguardando 8s para proxima tentativa...")
-            time.sleep(8)
-
-    raise Exception("Nao foi possivel baixar a playlist apos 6 tentativas.")
+def download_and_save_streaming(username, password, server, m3u_url):
+    log("Download e filtragem de M3U desativados para evitar bloqueio 403 (Redirecionamento será usado).")
+    return True
 
 def sync_to_github():
     """Faz commit e push dos arquivos atualizados de volta para o repositório GitHub"""
