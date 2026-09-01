@@ -156,21 +156,38 @@ def read_email_credentials(auth_token, max_attempts=12):
                 clean = re.sub(r'&[a-z]+;', ' ', clean)
                 clean = re.sub(r'\s+', ' ', clean).strip()
 
+                # Prioriza extrair direto do link da playlist (100% à prova de falhas)
+                m3u_match = re.search(r'(https?://[^\s<\"]+/playlist/(\d+)/([a-zA-Z0-9_-]+)/(?:m3u_plus|m3u)[^\s<\"]*)', clean)
+                
+                if m3u_match:
+                    full_url = m3u_match.group(1)
+                    user_val = m3u_match.group(2)
+                    pass_val = m3u_match.group(3)
+                    srv_val = re.match(r'(https?://[^/]+)', full_url).group(1)
+                    creds = {
+                        'username': user_val,
+                        'password': pass_val,
+                        'server': srv_val,
+                        'm3u_url': full_url,
+                        'updated_at': datetime.utcnow().isoformat() + 'Z'
+                    }
+                    log(f"Credenciais obtidas via M3U: Usuário={creds['username']} Senha={creds['password']}")
+                    return creds
+
+                # Fallback por campos individuais
                 user_m = re.search(r'(?:Usu[aá]rio|User)\s*[:\-]?\s*(\d+)', clean, re.IGNORECASE)
                 pass_m = re.search(r'(?:Senha|Password)\s*[:\-]?\s*(\w+)', clean, re.IGNORECASE)
                 server_m = re.search(r'(?:Servidor|Server)\s*[:\-]?\s*(https?://\S+)', clean, re.IGNORECASE)
-
-                m3u_m = re.search(r'(https?://\S+/playlist/\d+/\S+/m3u_plus)', clean, re.IGNORECASE)
 
                 if user_m and pass_m:
                     creds = {
                         'username': user_m.group(1),
                         'password': pass_m.group(1),
                         'server': server_m.group(1) if server_m else 'http://drd33.com',
-                        'm3u_url': m3u_m.group(1) if m3u_m else f"http://drd33.com/playlist/{user_m.group(1)}/{pass_m.group(1)}/m3u_plus",
+                        'm3u_url': f"http://drd33.com/playlist/{user_m.group(1)}/{pass_m.group(1)}/m3u_plus",
                         'updated_at': datetime.utcnow().isoformat() + 'Z'
                     }
-                    log(f"Credenciais obtidas com sucesso: Usuário={creds['username']}")
+                    log(f"Credenciais obtidas por campos: Usuário={creds['username']}")
                     return creds
             log(f"Tentativa {attempt+1}/{max_attempts} - aguardando e-mail...")
         except Exception as e:
