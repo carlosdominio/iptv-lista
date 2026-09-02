@@ -1,10 +1,7 @@
 name: Auto Renovador IPTV
 
 on:
-  schedule:
-    # Executa a cada 5 horas automaticamente
-    - cron: '0 */5 * * *'
-  workflow_dispatch: # Permite disparar manualmente pelo botão no GitHub
+  workflow_dispatch: # Apenas disparo manual se necessário
 
 permissions:
   contents: write
