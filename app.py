@@ -83,23 +83,26 @@ def trigger_cron():
 @app.route('/canais_brasil.m3u')
 def get_canais_brasil():
     creds = carregar_credenciais()
-    m3u_url = creds.get('m3u_url')
-    if not m3u_url and creds.get('username'):
-        m3u_url = f"http://drd33.com/playlist/{creds['username']}/{creds['password']}/m3u_plus"
-    if m3u_url:
+    user = creds.get('username')
+    pwd = creds.get('password')
+    server = creds.get('server', 'http://drd33.com')
+    if user and pwd:
         from flask import redirect
-        return redirect(m3u_url, code=302)
+        # Formato universal Xtream Codes 100% compatível com todas as Smart TVs
+        url_universal = f"{server}/get.php?username={user}&password={pwd}&type=m3u_plus&output=ts"
+        return redirect(url_universal, code=302)
     return "Lista não gerada ainda.", 404
 
 @app.route('/canais.m3u')
 def get_canais():
     creds = carregar_credenciais()
-    m3u_url = creds.get('m3u_url')
-    if not m3u_url and creds.get('username'):
-        m3u_url = f"http://drd33.com/playlist/{creds['username']}/{creds['password']}/m3u_plus"
-    if m3u_url:
+    user = creds.get('username')
+    pwd = creds.get('password')
+    server = creds.get('server', 'http://drd33.com')
+    if user and pwd:
         from flask import redirect
-        return redirect(m3u_url, code=302)
+        url_universal = f"{server}/get.php?username={user}&password={pwd}&type=m3u_plus&output=ts"
+        return redirect(url_universal, code=302)
     return "Lista não gerada ainda.", 404
 
 
