@@ -324,7 +324,8 @@ def sync_to_github():
         git remote set-url origin "{remote_url}" 2>/dev/null || git remote add origin "{remote_url}"
         git add creds.json
         git commit -m "Auto-sincronizacao creds.json: $(date -u '+%Y-%m-%d %H:%M:%S UTC')" || true
-        git push origin main
+        git pull --rebase origin main 2>/dev/null || true
+        git push --force origin main
         """
         res = subprocess.run(cmds, shell=True, capture_output=True, text=True)
         if res.returncode == 0:

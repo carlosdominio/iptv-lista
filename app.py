@@ -5,7 +5,18 @@ import renovar
 import urllib.request
 
 def carregar_credenciais():
-    """Carrega as credenciais mais recentes direto do GitHub Raw em tempo real"""
+    """Carrega as credenciais locais ou do GitHub Raw mais recente"""
+    # 1. Tenta carregar o arquivo local
+    if os.path.exists('creds.json'):
+        try:
+            with open('creds.json') as f:
+                data = json.load(f)
+                if data.get('username') and data.get('password'):
+                    return data
+        except Exception:
+            pass
+
+    # 2. Se local não existir, busca no GitHub Raw
     try:
         url_raw = "https://raw.githubusercontent.com/carlosdominio/iptv-lista/main/creds.json"
         req = urllib.request.Request(url_raw, headers={'User-Agent': 'Mozilla/5.0'})
@@ -16,12 +27,6 @@ def carregar_credenciais():
     except Exception:
         pass
 
-    if os.path.exists('creds.json'):
-        try:
-            with open('creds.json') as f:
-                return json.load(f)
-        except Exception:
-            pass
     return {}
 
 
