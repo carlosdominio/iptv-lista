@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Renovador Automático IPTV Ultra-Otimizado para Nuvem (Arquitetura de Redirecionamento).
-Gera novos testes automaticamente a cada 4 horas sem consumo de banda e sem bloqueio 403.
+Renovador Automático IPTV Ultra-Otimizado para Nuvem com Multi-Servidores de E-mail.
+Gera novos testes automaticamente rotacionando entre múltiplos provedores de e-mail (mail.tm, mail.gw, temp-mail.io).
 """
 
 import urllib.request, urllib.parse, http.cookiejar
@@ -31,11 +31,10 @@ def check_active():
             try:
                 clean_ts = updated_at_str.replace('Z', '')
                 dt = datetime.fromisoformat(clean_ts)
-                # Timestamp em UTC
                 now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
                 age_seconds = (now_utc - dt).total_seconds()
                 
-                # Testes duram 6 horas (21600s). Se tem menos de 3.5 horas (12600s), ainda está super ativo
+                # Testes duram 6 horas (21600s). Se tem menos de 3.5 horas (12600s), ainda está ativo
                 if 0 <= age_seconds < 12600:
                     remaining_min = (21600 - age_seconds) / 60
                     log(f"Conta '{user}' gerada há {age_seconds/60:.0f} min (válida por mais ~{remaining_min:.0f} min). Nada a fazer.")
@@ -51,36 +50,75 @@ def check_active():
         log(f"Aviso ao ler creds.json: {e}")
         return False
 
+# ==============================================================================
+# SISTEMA DE MULTI-PROVEDORES DE E-MAIL TEMPORÁRIO
+# ==============================================================================
+
 def get_temp_email():
-    log("Criando caixa de e-mail temporária...")
-    for attempt in range(4):
+    """Gera um e-mail temporário com suporte a múltiplos provedores e fallback automático"""
+    log("Criando caixa de e-mail temporária (selecionando servidor de e-mail disponível)...")
+    
+    # Provedores baseados na API REST do Hydra/Mail.tm (mail.tm e mail.gw)
+    hydra_providers = [
+        {"name": "mail.gw", "base": "https://api.mail.gw"},
+        {"name": "mail.tm", "base": "https://api.mail.tm"}
+    ]
+    random.shuffle(hydra_providers)
+
+    for prov in hydra_providers:
         try:
-            req = urllib.request.Request('https://api.mail.tm/domains', headers={'Accept': 'application/ld+json', 'User-Agent': UA})
+            p_name = prov["name"]
+            p_base = prov["base"]
+            
+            req = urllib.request.Request(f'{p_base}/domains', headers={'Accept': 'application/ld+json', 'User-Agent': UA})
             data = json.loads(urllib.request.urlopen(req, timeout=10).read().decode())
             domains = [d['domain'] for d in (data if isinstance(data, list) else data.get('hydra:member', []))]
-            domain = domains[0] if domains else 'emalupe.com'
+            if not domains:
+                continue
+            domain = random.choice(domains)
 
             username = f'iptv{random.randint(10000, 99999)}'
             email = f'{username}@{domain}'
             password = f'Pass{random.randint(1000, 9999)}!Auto'
 
             create_data = json.dumps({"address": email, "password": password}).encode()
-            req = urllib.request.Request('https://api.mail.tm/accounts', data=create_data,
+            req = urllib.request.Request(f'{p_base}/accounts', data=create_data,
                 headers={'Content-Type': 'application/json', 'Accept': 'application/ld+json', 'User-Agent': UA})
             urllib.request.urlopen(req, timeout=10)
 
             login_data = json.dumps({"address": email, "password": password}).encode()
-            req = urllib.request.Request('https://api.mail.tm/token', data=login_data,
+            req = urllib.request.Request(f'{p_base}/token', data=login_data,
                 headers={'Content-Type': 'application/json', 'Accept': 'application/json', 'User-Agent': UA})
             tok = json.loads(urllib.request.urlopen(req, timeout=10).read().decode())
 
-            log(f"E-mail gerado: {email}")
-            return email, tok['token']
+            log(f"E-mail gerado via {p_name}: {email}")
+            return {
+                "provider": "hydra",
+                "email": email,
+                "token": tok['token'],
+                "base": p_base
+            }
         except Exception as e:
-            log(f"Tentativa {attempt+1}/4 ao obter e-mail: {e}. Aguardando 5s...")
-            time.sleep(5)
+            log(f"Aviso: Servidor de e-mail {prov['name']} falhou ({e}). Tentando próximo...")
 
-    raise Exception("Falha ao obter e-mail temporário após várias tentativas.")
+    # Fallback 3: temp-mail.io
+    try:
+        req = urllib.request.Request('https://api.internal.temp-mail.io/api/v3/email/new', 
+            data=json.dumps({'min_name_length': 10, 'max_name_length': 10}).encode(),
+            headers={'Content-Type': 'application/json', 'User-Agent': UA})
+        data = json.loads(urllib.request.urlopen(req, timeout=10).read().decode())
+        email = data.get('email')
+        log(f"E-mail gerado via temp-mail.io: {email}")
+        return {
+            "provider": "tempmailio",
+            "email": email,
+            "token": data.get('token'),
+            "base": "https://api.internal.temp-mail.io/api/v3"
+        }
+    except Exception as e:
+        log(f"Aviso no temp-mail.io: {e}")
+
+    raise Exception("Todos os servidores de e-mail temporário falharam ao criar conta.")
 
 def generate_test(temp_email):
     log("Enviando requisição de geração de teste com assinatura autêntica de navegador...")
@@ -179,34 +217,54 @@ def generate_test(temp_email):
 
     raise Exception(f"Falha ao gerar teste no CorePlay (última resposta: {resp if 'resp' in locals() else 'timeout'}).")
 
-def read_email_credentials(auth_token, max_attempts=12):
+def read_email_credentials(mail_account, max_attempts=12):
+    """Lê as credenciais da caixa de e-mail temporária com suporte a múltiplos provedores"""
     log("Aguardando chegada do e-mail com as credenciais...")
     time.sleep(15)
 
+    provider = mail_account.get("provider", "hydra")
+
     for attempt in range(max_attempts):
         try:
-            req = urllib.request.Request('https://api.mail.tm/messages', headers={
-                'Accept': 'application/ld+json', 'Authorization': f'Bearer {auth_token}', 'User-Agent': UA
-            })
-            mdata = json.loads(urllib.request.urlopen(req, timeout=10).read().decode())
-            msgs = mdata.get('hydra:member', []) if isinstance(mdata, dict) else []
+            html_bodies = []
 
-            for m in msgs:
-                mid = m.get('id', '')
-                req2 = urllib.request.Request(f'https://api.mail.tm/messages/{mid}', headers={
+            if provider == "hydra":
+                p_base = mail_account["base"]
+                auth_token = mail_account["token"]
+                req = urllib.request.Request(f'{p_base}/messages', headers={
                     'Accept': 'application/ld+json', 'Authorization': f'Bearer {auth_token}', 'User-Agent': UA
                 })
-                full = json.loads(urllib.request.urlopen(req2, timeout=10).read().decode())
-                html_body = full.get('html', [''])[0] if isinstance(full.get('html'), list) else (full.get('html') or full.get('text', ''))
+                mdata = json.loads(urllib.request.urlopen(req, timeout=10).read().decode())
+                msgs = mdata.get('hydra:member', []) if isinstance(mdata, dict) else []
 
+                for m in msgs:
+                    mid = m.get('id', '')
+                    req2 = urllib.request.Request(f'{p_base}/messages/{mid}', headers={
+                        'Accept': 'application/ld+json', 'Authorization': f'Bearer {auth_token}', 'User-Agent': UA
+                    })
+                    full = json.loads(urllib.request.urlopen(req2, timeout=10).read().decode())
+                    hb = full.get('html', [''])[0] if isinstance(full.get('html'), list) else (full.get('html') or full.get('text', ''))
+                    if hb:
+                        html_bodies.append(hb)
+
+            elif provider == "tempmailio":
+                email = mail_account["email"]
+                req = urllib.request.Request(f'https://api.internal.temp-mail.io/api/v3/email/{email}/messages', headers={'User-Agent': UA})
+                msgs = json.loads(urllib.request.urlopen(req, timeout=10).read().decode())
+                for m in (msgs if isinstance(msgs, list) else []):
+                    hb = m.get('body_html') or m.get('body_text') or ''
+                    if hb:
+                        html_bodies.append(hb)
+
+            # Processa os corpos de e-mail recebidos
+            for html_body in html_bodies:
                 clean = re.sub(r'<[^>]+>', ' ', html_body)
                 clean = re.sub(r'&[a-z]+;', ' ', clean)
                 clean = re.sub(r'\s+', ' ', clean).strip()
 
-                # Prioriza extrair direto do link da playlist (100% à prova de falhas)
                 m3u_match = re.search(r'(https?://[^\s<"]+/playlist/(\d+)/([a-zA-Z0-9_-]+)/(?:m3u_plus|m3u)[^\s<"]*)', clean)
-                
                 now_iso = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+
                 if m3u_match:
                     full_url = m3u_match.group(1)
                     user_val = m3u_match.group(2)
@@ -222,7 +280,6 @@ def read_email_credentials(auth_token, max_attempts=12):
                     log(f"Credenciais obtidas via M3U: Usuário={creds['username']} Senha={creds['password']}")
                     return creds
 
-                # Fallback por campos individuais
                 user_m = re.search(r'(?:Usu[aá]rio|User)\s*[:\-]?\s*(\d+)', clean, re.IGNORECASE)
                 pass_m = re.search(r'(?:Senha|Password)\s*[:\-]?\s*(\w+)', clean, re.IGNORECASE)
                 server_m = re.search(r'(?:Servidor|Server)\s*[:\-]?\s*(https?://\S+)', clean, re.IGNORECASE)
@@ -237,6 +294,7 @@ def read_email_credentials(auth_token, max_attempts=12):
                     }
                     log(f"Credenciais obtidas por campos: Usuário={creds['username']}")
                     return creds
+
             log(f"Tentativa {attempt+1}/{max_attempts} - aguardando e-mail...")
         except Exception as e:
             log(f"Aviso tentativa {attempt+1}: {e}")
@@ -257,8 +315,8 @@ def sync_to_github():
     try:
         log("Sincronizando creds.json de volta para o GitHub...")
         import subprocess
-        remote_url = f"https://{repo_user}:{token}@github.com/{repo_user}/{repo_name}.git"
         repo_dir = os.path.dirname(os.path.abspath(__file__))
+        remote_url = f"https://{repo_user}:{token}@github.com/{repo_user}/{repo_name}.git"
         cmds = f"""
         cd "{repo_dir}"
         git config user.name "IPTV Cloud Bot"
@@ -283,12 +341,11 @@ def main(force=False):
         log("✅ Credenciais atuais válidas e ativas. Nada a fazer.")
         return
 
-    # Loop de tentativas completo para garantir resiliência
     for run_attempt in range(3):
         try:
-            email, token = get_temp_email()
-            generate_test(email)
-            creds = read_email_credentials(token)
+            mail_account = get_temp_email()
+            generate_test(mail_account["email"])
+            creds = read_email_credentials(mail_account)
 
             with open('creds.json', 'w', encoding='utf-8') as f:
                 json.dump(creds, f, indent=2)
@@ -299,7 +356,7 @@ def main(force=False):
         except Exception as e:
             log(f"Ciclo {run_attempt+1}/3 falhou: {e}")
             if run_attempt < 2:
-                log("Aguardando 10s para tentar um novo ciclo completo...")
+                log("Aguardando 10s para tentar com outro servidor de e-mail...")
                 time.sleep(10)
             else:
                 raise e
