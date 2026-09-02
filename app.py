@@ -32,25 +32,32 @@ def home():
 
 @app.route('/cron')
 @app.route('/renovar')
+@app.route('/forcar')
+@app.route('/simular')
 def trigger_cron():
-    """Endpoint chamado pelo cron-job.org a cada 4 horas"""
+    """Endpoint chamado pelo cron-job.org ou manualmente para forçar/simular"""
+    from flask import request
     global IS_RUNNING
     if IS_RUNNING:
-        return Response("BUSY", mimetype="text/plain", status=200)
+        return Response("BUSY (Ja existe uma renovacao em andamento)", mimetype="text/plain", status=200)
+
+    # Permite forçar renovação se acessar /forcar, /simular ou /cron?force=1
+    is_force = request.path in ['/forcar', '/simular'] or request.args.get('force') in ['1', 'true', 'sim']
 
     def run_worker():
         global IS_RUNNING
         with LOCK:
             IS_RUNNING = True
             try:
-                renovar.main(force=False)
+                renovar.main(force=is_force)
             except Exception as e:
                 print(f"[Cron Error] {e}", flush=True)
             finally:
                 IS_RUNNING = False
 
     threading.Thread(target=run_worker, daemon=True).start()
-    return Response("OK", mimetype="text/plain", status=200)
+    msg = "SIMULACAO FORCADA INICIADA (Acompanhe os logs no Render)" if is_force else "OK"
+    return Response(msg, mimetype="text/plain", status=200)
 
 @app.route('/canais_brasil.m3u')
 def get_canais_brasil():
