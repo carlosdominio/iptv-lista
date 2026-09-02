@@ -83,14 +83,14 @@ def get_temp_email():
     raise Exception("Falha ao obter e-mail temporário após várias tentativas.")
 
 def generate_test(temp_email):
-    log("Enviando requisição de geração de teste...")
-    for attempt in range(3):
+    log("Enviando requisição de geração de teste com assinatura autêntica de navegador...")
+    for attempt in range(4):
         try:
             cj = http.cookiejar.CookieJar()
             opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cj))
 
             html = opener.open(urllib.request.Request('https://teste.coreplay.vc/',
-                headers={'User-Agent': UA, 'Accept-Language': 'pt-BR,pt;q=0.9'}),
+                headers={'User-Agent': UA, 'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7'}),
                 timeout=15).read().decode('utf-8', errors='ignore')
 
             cp_sn_match = re.search(r'id="cp_sn"[^>]*value="([^"]+)"', html)
@@ -103,31 +103,67 @@ def generate_test(temp_email):
                 'teste.coreplay.vc', False, False, '/', True, False,
                 int(time.time()) + 31536000, False, None, None, {}))
 
-            device_fp = hashlib.md5(f'{UA}|{random.random()}'.encode()).hexdigest()
-            ddd = random.choice(['11', '21', '31', '41', '51', '61', '71', '81', '85', '47', '48', '27'])
-            telefone = f'+55{ddd}{random.randint(900000000, 999999999)}'
+            # Fingerprint SHA256 genuíno e consistente com o cp-attribution.js
+            device_fp = hashlib.sha256(f'{UA}|{random.random()}|{device_id}'.encode()).hexdigest()
+            ddd = random.choice(['11', '21', '31', '41', '51', '61', '71', '81', '85', '47', '48', '27', '82'])
+            telefone = f'+55{ddd}9{random.randint(10000000, 99999999)}'
 
             key = hashlib.md5(base64.b64encode(temp_email.encode())).hexdigest()
             cp_jsp = hashlib.md5(f'{cp_sn}:{device_id}:Cp9xQ2m7Ka'.encode()).hexdigest()
+
+            attrs = {
+                'canvasHash': hashlib.md5(f'canvas{random.random()}'.encode()).hexdigest()[:16],
+                'webglVendor': 'Google Inc. (Intel)',
+                'webglRenderer': 'ANGLE (Intel, Intel(R) UHD Graphics 620 Direct3D11 vs_5_0 ps_5_0, D3D11)',
+                'audioHash': hashlib.md5(f'audio{random.random()}'.encode()).hexdigest()[:16],
+                'cores': 8, 'memoria': 8, 'touch': 0, 'tela': '1920x1080x24@1',
+                'tz': 'America/Sao_Paulo', 'idioma': 'pt-BR,pt,en-US,en', 'plataforma': 'Win32',
+                'modelo': '',
+                'fontes': 'Arial,Calibri,Cambria,Consolas,Courier New,Georgia,Helvetica,Impact,Segoe UI,Tahoma,Times New Roman,Verdana',
+                'codecs': 'h264,hevc,vp9,av1,aac,mp3,ac3,eac3', 'drm': 'widevine,playready'
+            }
+
+            iptv_caps = {
+                'mse': True, 'hls': True, 'dash': True, 'eme': True,
+                'canPlayH264': 'probably', 'canPlayHevc': 'maybe', 'canPlayAac': 'probably'
+            }
 
             payload = {
                 'key': key, 'email': temp_email, 'pacote': '[1,2,3,5,6,7]',
                 'telefone': telefone, 'fingerprint': device_fp,
                 'cp_device_id': device_id, 'cp_device_fp': device_fp,
                 'cp_flow_tag': '',
-                'cp_device_attrs': json.dumps({"ua": UA, "lang": "pt-BR", "tz": "America/Sao_Paulo", "res": "1920x1080", "webdriver": False}),
-                'cp_bot_flags': '', 'cp_iptv_caps': json.dumps({"mse": True}),
+                'cp_device_attrs': json.dumps(attrs),
+                'cp_bot_flags': '[]',
+                'cp_iptv_caps': json.dumps(iptv_caps),
                 'cp_hp': '', 'cp_sn': cp_sn, 'cp_jsp': cp_jsp,
                 'cp_attr_source_hint': 'direct', 'cp_attr_channel_group': 'Direct',
                 'cp_attr_landing_url': 'https://teste.coreplay.vc/',
+                'cp_attr_landing_host': 'teste.coreplay.vc',
+                'cp_attr_device_type': 'desktop', 'cp_attr_os': 'Windows',
+                'cp_attr_browser': 'Chrome', 'cp_attr_language': 'pt-BR',
+                'cp_attr_screen': '1920x1080', 'cp_attr_visit_count': '1',
+                'cp_attr_submit_ms': '3842', 'cp_attr_interactions': '14',
+                'cp_attr_email_keys': str(len(temp_email)),
+                'cp_attr_phone_keys': str(len(telefone))
             }
 
             time.sleep(2)
             data = urllib.parse.urlencode(payload).encode()
             req = urllib.request.Request('https://teste.coreplay.vc/gerarteste', data=data, headers={
-                'User-Agent': UA, 'Referer': 'https://teste.coreplay.vc/',
-                'Origin': 'https://teste.coreplay.vc', 'X-Requested-With': 'XMLHttpRequest',
+                'User-Agent': UA,
+                'Referer': 'https://teste.coreplay.vc/',
+                'Origin': 'https://teste.coreplay.vc',
+                'X-Requested-With': 'XMLHttpRequest',
                 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+                'Accept': '*/*',
+                'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
+                'Sec-Ch-Ua': '"Not/A)Brand";v="8", "Chromium";v="126", "Google Chrome";v="126"',
+                'Sec-Ch-Ua-Mobile': '?0',
+                'Sec-Ch-Ua-Platform': '"Windows"',
+                'Sec-Fetch-Dest': 'empty',
+                'Sec-Fetch-Mode': 'cors',
+                'Sec-Fetch-Site': 'same-origin'
             })
 
             resp = opener.open(req, timeout=20).read().decode('utf-8', errors='ignore').strip()
@@ -138,7 +174,7 @@ def generate_test(temp_email):
                 log(f"Aviso: Gerador retornou '{resp}'. Aguardando 6s para tentar novamente...")
                 time.sleep(6)
         except Exception as e:
-            log(f"Tentativa {attempt+1}/3 falhou no gerador: {e}. Aguardando 6s...")
+            log(f"Tentativa {attempt+1}/4 falhou no gerador: {e}. Aguardando 6s...")
             time.sleep(6)
 
     raise Exception(f"Falha ao gerar teste no CorePlay (última resposta: {resp if 'resp' in locals() else 'timeout'}).")
