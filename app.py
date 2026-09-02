@@ -2,6 +2,28 @@ import os, json, threading, time
 from datetime import datetime
 from flask import Flask, Response, jsonify
 import renovar
+import urllib.request
+
+def carregar_credenciais():
+    """Carrega as credenciais mais recentes direto do GitHub Raw em tempo real"""
+    try:
+        url_raw = "https://raw.githubusercontent.com/carlosdominio/iptv-lista/main/creds.json"
+        req = urllib.request.Request(url_raw, headers={'User-Agent': 'Mozilla/5.0'})
+        with urllib.request.urlopen(req, timeout=4) as r:
+            data = json.loads(r.read().decode())
+            if data.get('username') and data.get('password'):
+                return data
+    except Exception:
+        pass
+
+    if os.path.exists('creds.json'):
+        try:
+            with open('creds.json') as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {}
+
 
 app = Flask(__name__)
 
@@ -10,13 +32,7 @@ LOCK = threading.Lock()
 
 @app.route('/')
 def home():
-    creds = {}
-    if os.path.exists('creds.json'):
-        try:
-            with open('creds.json') as f:
-                creds = json.load(f)
-        except:
-            pass
+    creds = carregar_credenciais()
     return jsonify({
         "status": "online",
         "servico": "Auto-Renovador IPTV na Nuvem",
@@ -61,14 +77,7 @@ def trigger_cron():
 
 @app.route('/canais_brasil.m3u')
 def get_canais_brasil():
-    creds = {}
-    import json, os
-    if os.path.exists('creds.json'):
-        try:
-            with open('creds.json') as f:
-                creds = json.load(f)
-        except:
-            pass
+    creds = carregar_credenciais()
     m3u_url = creds.get('m3u_url')
     if not m3u_url and creds.get('username'):
         m3u_url = f"http://drd33.com/playlist/{creds['username']}/{creds['password']}/m3u_plus"
@@ -79,14 +88,7 @@ def get_canais_brasil():
 
 @app.route('/canais.m3u')
 def get_canais():
-    creds = {}
-    import json, os
-    if os.path.exists('creds.json'):
-        try:
-            with open('creds.json') as f:
-                creds = json.load(f)
-        except:
-            pass
+    creds = carregar_credenciais()
     m3u_url = creds.get('m3u_url')
     if not m3u_url and creds.get('username'):
         m3u_url = f"http://drd33.com/playlist/{creds['username']}/{creds['password']}/m3u_plus"
@@ -98,13 +100,7 @@ def get_canais():
 
 @app.route('/epg.xml')
 def get_epg():
-    creds = {}
-    if os.path.exists('creds.json'):
-        try:
-            with open('creds.json') as f:
-                creds = json.load(f)
-        except:
-            pass
+    creds = carregar_credenciais()
     if creds.get('username') and creds.get('password'):
         from flask import redirect
         epg_url = f"http://drd33.com/xmltv.php?username={creds['username']}&password={creds['password']}"
