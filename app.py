@@ -5,8 +5,19 @@ import renovar
 import urllib.request
 
 def carregar_credenciais():
-    """Carrega as credenciais locais ou do GitHub Raw mais recente"""
-    # 1. Tenta carregar o arquivo local
+    """Carrega sempre as credenciais mais recentes do GitHub Raw em tempo real"""
+    # 1. Sempre prioriza a versão mais recente direto do GitHub Raw (Sem cache)
+    try:
+        url_raw = f"https://raw.githubusercontent.com/carlosdominio/iptv-lista/main/creds.json?t={int(time.time())}"
+        req = urllib.request.Request(url_raw, headers={'User-Agent': 'Mozilla/5.0', 'Cache-Control': 'no-cache, no-store, must-revalidate'})
+        with urllib.request.urlopen(req, timeout=4) as r:
+            data = json.loads(r.read().decode())
+            if data.get('username') and data.get('password'):
+                return data
+    except Exception as e:
+        pass
+
+    # 2. Fallback caso o GitHub esteja indisponível
     if os.path.exists('creds.json'):
         try:
             with open('creds.json') as f:
@@ -15,17 +26,6 @@ def carregar_credenciais():
                     return data
         except Exception:
             pass
-
-    # 2. Se local não existir, busca no GitHub Raw
-    try:
-        url_raw = "https://raw.githubusercontent.com/carlosdominio/iptv-lista/main/creds.json"
-        req = urllib.request.Request(url_raw, headers={'User-Agent': 'Mozilla/5.0'})
-        with urllib.request.urlopen(req, timeout=4) as r:
-            data = json.loads(r.read().decode())
-            if data.get('username') and data.get('password'):
-                return data
-    except Exception:
-        pass
 
     return {}
 
