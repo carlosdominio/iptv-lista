@@ -157,6 +157,8 @@ def trigger_cron():
 
 @app.route('/canais_brasil.m3u')
 @app.route('/canais.m3u')
+@app.route('/canais_brasil.m3u8')
+@app.route('/canais.m3u8')
 def get_canais_inteligente():
     """Entrega a lista com links dinâmicos eternos (/live/<id>.ts)"""
     # 1. Se o arquivo pré-gerado com links neutros existir, entrega com suporte a streaming
@@ -223,6 +225,16 @@ def proxy_series_stream(stream_path):
     if not user or not pwd:
         return "Erro: Nenhuma conta ativa no momento", 503
     resp = redirect(f"{server}/series/{user}/{pwd}/{stream_path}", code=302)
+    resp.headers['Access-Control-Allow-Origin'] = '*'
+    resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+    return resp
+
+@app.route('/hls/<path:stream_path>')
+def proxy_hls_stream(stream_path):
+    """Redireciona chunks HLS caso o player resolva o caminho relativo na raiz"""
+    creds = carregar_credenciais()
+    server = creds.get('server', 'http://drd33.com').rstrip('/')
+    resp = redirect(f"{server}/hls/{stream_path}", code=302)
     resp.headers['Access-Control-Allow-Origin'] = '*'
     resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
     return resp
