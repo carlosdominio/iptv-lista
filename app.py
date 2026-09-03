@@ -4,28 +4,100 @@ from flask import Flask, Response, jsonify, redirect, request, send_file
 import renovar
 import urllib.request
 
-def carregar_credenciais():
-    """Carrega sempre as credenciais mais recentes do GitHub Raw ou local"""
-    # 1. Sempre prioriza a versão mais recente direto do GitHub Raw (Sem cache)
+# =========================================================================
+# CACHE EM MEMÓRIA RAM ULTRA-RÁPIDO (< 1ms)
+# =========================================================================
+_CACHED_CREDS = {}
+_LAST_FETCH_TIME = 0
+_CACHE_LOCK = threading.Lock()
+_CACHE_TTL = 60  # Recalibra a cada 60 segundos em segundo plano
+_IS_FETCHING = False
+
+def _fetch_from_github():
+    """Busca as credenciais mais recentes direto do GitHub Raw"""
     try:
         url_raw = f"https://raw.githubusercontent.com/carlosdominio/iptv-lista/main/creds.json?t={int(time.time())}"
-        req = urllib.request.Request(url_raw, headers={'User-Agent': 'Mozilla/5.0', 'Cache-Control': 'no-cache, no-store, must-revalidate'})
+        req = urllib.request.Request(url_raw, headers={
+            'User-Agent': 'Mozilla/5.0',
+            'Cache-Control': 'no-cache, no-store, must-revalidate'
+        })
         with urllib.request.urlopen(req, timeout=3) as r:
             data = json.loads(r.read().decode())
             if data.get('username') and data.get('password'):
                 return data
     except Exception:
         pass
+    return None
 
-    # 2. Fallback caso o GitHub esteja indisponível
+def _fetch_from_disk():
+    """Lê as credenciais salvas no disco local"""
     if os.path.exists('creds.json'):
         try:
-            with open('creds.json') as f:
+            with open('creds.json', 'r', encoding='utf-8') as f:
                 data = json.load(f)
                 if data.get('username') and data.get('password'):
                     return data
         except Exception:
             pass
+    return None
+
+def atualizar_credenciais_background():
+    """Atualiza as credenciais em segundo plano sem travar a reprodução do usuário"""
+    global _CACHED_CREDS, _LAST_FETCH_TIME, _IS_FETCHING
+    if _IS_FETCHING:
+        return
+    _IS_FETCHING = True
+    try:
+        data = _fetch_from_github()
+        if not data:
+            data = _fetch_from_disk()
+        if data and data.get('username') and data.get('password'):
+            with _CACHE_LOCK:
+                _CACHED_CREDS = data
+                _LAST_FETCH_TIME = time.time()
+            try:
+                with open('creds.json', 'w', encoding='utf-8') as f:
+                    json.dump(data, f, indent=2)
+            except Exception:
+                pass
+    except Exception:
+        pass
+    finally:
+        _IS_FETCHING = False
+
+def carregar_credenciais():
+    """Retorna instantaneamente da memória RAM (< 1ms).
+    Usa Stale-While-Revalidate: nunca bloqueia a conexão da TV."""
+    global _CACHED_CREDS, _LAST_FETCH_TIME
+
+    now = time.time()
+
+    # 1. Se já está na memória e dentro do TTL (60s), retorna na hora (< 0.01ms)
+    with _CACHE_LOCK:
+        if _CACHED_CREDS and (now - _LAST_FETCH_TIME < _CACHE_TTL):
+            return _CACHED_CREDS
+
+    # 2. Se já temos cache mas passou de 60s, dispara atualização assíncrona e retorna o cache atual
+    if _CACHED_CREDS:
+        threading.Thread(target=atualizar_credenciais_background, daemon=True).start()
+        return _CACHED_CREDS
+
+    # 3. Se ainda não há nada na memória (início a frio), lê do disco imediatamente
+    disk_data = _fetch_from_disk()
+    if disk_data:
+        with _CACHE_LOCK:
+            _CACHED_CREDS = disk_data
+            _LAST_FETCH_TIME = now
+        threading.Thread(target=atualizar_credenciais_background, daemon=True).start()
+        return _CACHED_CREDS
+
+    # 4. Caso extremo (sem disco e sem RAM), busca sincronicamente uma vez
+    gh_data = _fetch_from_github()
+    if gh_data:
+        with _CACHE_LOCK:
+            _CACHED_CREDS = gh_data
+            _LAST_FETCH_TIME = now
+        return _CACHED_CREDS
 
     return {}
 
@@ -63,11 +135,17 @@ def trigger_cron():
     is_force = request.path in ['/forcar', '/simular'] or request.args.get('force') in ['1', 'true', 'sim']
 
     def run_worker():
-        global IS_RUNNING
+        global IS_RUNNING, _CACHED_CREDS, _LAST_FETCH_TIME
         with LOCK:
             IS_RUNNING = True
             try:
                 renovar.main(force=is_force)
+                # Imediatamente atualiza o cache com a nova conta gerada
+                disk_data = _fetch_from_disk()
+                if disk_data:
+                    with _CACHE_LOCK:
+                        _CACHED_CREDS = disk_data
+                        _LAST_FETCH_TIME = time.time()
             except Exception as e:
                 print(f"[Cron Error] {e}", flush=True)
             finally:
@@ -85,6 +163,7 @@ def get_canais_inteligente():
     file_target = 'canais_brasil.m3u' if os.path.exists('canais_brasil.m3u') else 'canais.m3u'
     if os.path.exists(file_target):
         response = send_file(file_target, mimetype='application/x-mpegURL')
+        response.headers['Access-Control-Allow-Origin'] = '*'
         response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
         return response
 
@@ -95,7 +174,10 @@ def get_canais_inteligente():
     server = creds.get('server', 'http://drd33.com')
     if user and pwd:
         url_universal = f"{server}/get.php?username={user}&password={pwd}&type=m3u_plus&output=ts"
-        return redirect(url_universal, code=302)
+        resp = redirect(url_universal, code=302)
+        resp.headers['Access-Control-Allow-Origin'] = '*'
+        resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+        return resp
     return "Lista não gerada ainda.", 404
 
 # =========================================================================
@@ -104,15 +186,18 @@ def get_canais_inteligente():
 
 @app.route('/live/<path:stream_path>')
 def proxy_live_stream(stream_path):
-    """Redireciona dinamicamente para o canal ao vivo com a credencial ativa do segundo atual"""
+    """Redireciona dinamicamente para o canal ao vivo com a credencial ativa do segundo atual (< 1ms)"""
     creds = carregar_credenciais()
     user = creds.get('username')
     pwd = creds.get('password')
     server = creds.get('server', 'http://drd33.com').rstrip('/')
     if not user or not pwd:
         return "Erro: Nenhuma conta ativa no momento", 503
-    # Redireciona 302 em 1 milissegundo para o servidor oficial com a conta ativa
-    return redirect(f"{server}/{user}/{pwd}/{stream_path}", code=302)
+    # Redireciona 302 instantaneamente para o servidor com a conta ativa
+    resp = redirect(f"{server}/{user}/{pwd}/{stream_path}", code=302)
+    resp.headers['Access-Control-Allow-Origin'] = '*'
+    resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+    return resp
 
 @app.route('/movie/<path:stream_path>')
 def proxy_movie_stream(stream_path):
@@ -123,7 +208,10 @@ def proxy_movie_stream(stream_path):
     server = creds.get('server', 'http://drd33.com').rstrip('/')
     if not user or not pwd:
         return "Erro: Nenhuma conta ativa no momento", 503
-    return redirect(f"{server}/movie/{user}/{pwd}/{stream_path}", code=302)
+    resp = redirect(f"{server}/movie/{user}/{pwd}/{stream_path}", code=302)
+    resp.headers['Access-Control-Allow-Origin'] = '*'
+    resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+    return resp
 
 @app.route('/series/<path:stream_path>')
 def proxy_series_stream(stream_path):
@@ -134,14 +222,21 @@ def proxy_series_stream(stream_path):
     server = creds.get('server', 'http://drd33.com').rstrip('/')
     if not user or not pwd:
         return "Erro: Nenhuma conta ativa no momento", 503
-    return redirect(f"{server}/series/{user}/{pwd}/{stream_path}", code=302)
+    resp = redirect(f"{server}/series/{user}/{pwd}/{stream_path}", code=302)
+    resp.headers['Access-Control-Allow-Origin'] = '*'
+    resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+    return resp
 
 @app.route('/epg.xml')
 def get_epg():
     creds = carregar_credenciais()
     if creds.get('username') and creds.get('password'):
-        epg_url = f"http://drd33.com/xmltv.php?username={creds['username']}&password={creds['password']}"
-        return redirect(epg_url, code=302)
+        server = creds.get('server', 'http://drd33.com').rstrip('/')
+        epg_url = f"{server}/xmltv.php?username={creds['username']}&password={creds['password']}"
+        resp = redirect(epg_url, code=302)
+        resp.headers['Access-Control-Allow-Origin'] = '*'
+        resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+        return resp
     return "Nenhuma conta ativa para gerar EPG.", 404
 
 if __name__ == '__main__':
