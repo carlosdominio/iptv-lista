@@ -1,11 +1,11 @@
-import os, json, threading, time
-from datetime import datetime
+import os, json, threading, time, base64
+from datetime import datetime, timezone
 from flask import Flask, Response, jsonify, redirect, request, send_file
 import renovar
 import urllib.request
 
 # =========================================================================
-# CACHE EM MEMÓRIA RAM ULTRA-RÁPIDO (< 1ms)
+# CACHE EM MEMÓRIA RAM ULTRA-RÁPIDO COM VALIDAÇÃO DE EXPIRAÇÃO
 # =========================================================================
 _CACHED_CREDS = {}
 _LAST_FETCH_TIME = 0
@@ -13,29 +13,60 @@ _CACHE_LOCK = threading.Lock()
 _CACHE_TTL = 60  # Recalibra a cada 60 segundos em segundo plano
 _IS_FETCHING = False
 
+def is_cred_valid(data):
+    """Verifica se a credencial tem menos de 3.5 horas de vida"""
+    if not data or not data.get('username') or not data.get('password'):
+        return False
+    ts_str = data.get('updated_at') or data.get('generated_at')
+    if not ts_str:
+        return False
+    try:
+        clean = ts_str.replace('Z', '')
+        dt = datetime.fromisoformat(clean)
+        now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
+        age = (now_utc - dt).total_seconds()
+        # Testes duram no máximo 4 horas. Se tem mais de 3.5h (12600s), está expirada!
+        return 0 <= age < 12600
+    except Exception:
+        return False
+
 def _fetch_from_github():
-    """Busca as credenciais mais recentes direto do GitHub Raw"""
+    """Busca as credenciais mais recentes direto da API do GitHub (sem cache de 5 minutos do Fastly)"""
+    # 1. Tentar via API oficial do GitHub (bypass total de cache)
+    try:
+        url_api = "https://api.github.com/repos/carlosdominio/iptv-lista/contents/creds.json"
+        req = urllib.request.Request(url_api, headers={'User-Agent': 'Mozilla/5.0'})
+        with urllib.request.urlopen(req, timeout=3) as r:
+            res_json = json.loads(r.read().decode())
+            data = json.loads(base64.b64decode(res_json['content']).decode('utf-8'))
+            if is_cred_valid(data):
+                return data
+    except Exception:
+        pass
+
+    # 2. Fallback via Raw caso a API falhe ou dê rate-limit
     try:
         url_raw = f"https://raw.githubusercontent.com/carlosdominio/iptv-lista/main/creds.json?t={int(time.time())}"
         req = urllib.request.Request(url_raw, headers={
             'User-Agent': 'Mozilla/5.0',
-            'Cache-Control': 'no-cache, no-store, must-revalidate'
+            'Cache-Control': 'no-cache, no-store, must-revalidate',
+            'Pragma': 'no-cache'
         })
         with urllib.request.urlopen(req, timeout=3) as r:
             data = json.loads(r.read().decode())
-            if data.get('username') and data.get('password'):
+            if is_cred_valid(data):
                 return data
     except Exception:
         pass
     return None
 
 def _fetch_from_disk():
-    """Lê as credenciais salvas no disco local"""
+    """Lê as credenciais salvas no disco local (apenas se ainda forem válidas)"""
     if os.path.exists('creds.json'):
         try:
             with open('creds.json', 'r', encoding='utf-8') as f:
                 data = json.load(f)
-                if data.get('username') and data.get('password'):
+                if is_cred_valid(data):
                     return data
         except Exception:
             pass
@@ -67,22 +98,22 @@ def atualizar_credenciais_background():
 
 def carregar_credenciais():
     """Retorna instantaneamente da memória RAM (< 1ms).
-    Usa Stale-While-Revalidate: nunca bloqueia a conexão da TV."""
+    Garante que nunca entrega conta expirada ou antiga."""
     global _CACHED_CREDS, _LAST_FETCH_TIME
 
     now = time.time()
 
-    # 1. Se já está na memória e dentro do TTL (60s), retorna na hora (< 0.01ms)
+    # 1. Se já está na memória e dentro do TTL (60s) E ainda é válida, retorna na hora
     with _CACHE_LOCK:
-        if _CACHED_CREDS and (now - _LAST_FETCH_TIME < _CACHE_TTL):
+        if _CACHED_CREDS and (now - _LAST_FETCH_TIME < _CACHE_TTL) and is_cred_valid(_CACHED_CREDS):
             return _CACHED_CREDS
 
-    # 2. Se já temos cache mas passou de 60s, dispara atualização assíncrona e retorna o cache atual
-    if _CACHED_CREDS:
+    # 2. Se temos cache válido mas passou de 60s, dispara atualização assíncrona e retorna o cache
+    if _CACHED_CREDS and is_cred_valid(_CACHED_CREDS):
         threading.Thread(target=atualizar_credenciais_background, daemon=True).start()
         return _CACHED_CREDS
 
-    # 3. Se ainda não há nada na memória (início a frio), lê do disco imediatamente
+    # 3. Se não há cache válido na memória (início a frio), tenta ler do disco (se for válida)
     disk_data = _fetch_from_disk()
     if disk_data:
         with _CACHE_LOCK:
@@ -91,13 +122,26 @@ def carregar_credenciais():
         threading.Thread(target=atualizar_credenciais_background, daemon=True).start()
         return _CACHED_CREDS
 
-    # 4. Caso extremo (sem disco e sem RAM), busca sincronicamente uma vez
+    # 4. Se o disco está expirado ou vazio, busca sincronicamente do GitHub imediatamente
     gh_data = _fetch_from_github()
     if gh_data:
         with _CACHE_LOCK:
             _CACHED_CREDS = gh_data
             _LAST_FETCH_TIME = now
+        try:
+            with open('creds.json', 'w', encoding='utf-8') as f:
+                json.dump(gh_data, f, indent=2)
+        except Exception:
+            pass
         return _CACHED_CREDS
+
+    # 5. Último recurso se o GitHub estiver fora: retorna o que tiver (mesmo que antigo)
+    if os.path.exists('creds.json'):
+        try:
+            with open('creds.json', 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except Exception:
+            pass
 
     return {}
 
