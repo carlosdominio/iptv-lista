@@ -117,6 +117,7 @@ def home():
         "links": {
             "canais_brasil": "/canais_brasil.m3u",
             "canais_todos": "/canais.m3u",
+            "lista_completa": "/completa.m3u",
             "guia_epg": "/epg.xml",
             "forcar_renovacao": "/cron"
         }
@@ -181,6 +182,24 @@ def get_canais_inteligente():
         resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
         return resp
     return "Lista não gerada ainda.", 404
+
+@app.route('/completa.m3u')
+@app.route('/lista_completa.m3u')
+@app.route('/completa.m3u8')
+@app.route('/lista_completa.m3u8')
+def get_lista_completa():
+    """Entrega a lista completa oficial contendo todos os Canais, Filmes (VOD) e Séries"""
+    creds = carregar_credenciais()
+    user = creds.get('username')
+    pwd = creds.get('password')
+    server = creds.get('server', 'http://drd33.com').rstrip('/')
+    if user and pwd:
+        url_master = f"{server}/get.php?username={user}&password={pwd}&type=m3u_plus&output=ts"
+        resp = redirect(url_master, code=302)
+        resp.headers['Access-Control-Allow-Origin'] = '*'
+        resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+        return resp
+    return "Nenhuma conta ativa para gerar a lista completa.", 503
 
 # =========================================================================
 # ROTAS DINÂMICAS INTELIGENTES (STREAM PROXY - NUNCA EXPIRAM)
