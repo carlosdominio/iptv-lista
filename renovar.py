@@ -220,9 +220,15 @@ def generate_test(temp_email):
             log(f"Resposta do gerador ({domain_host}): {resp}")
             if resp == 'sendok':
                 return True
-            else:
-                log(f"Aviso: Gerador recusou o e-mail com '{resp}'. Rotacionando provedor...")
+            elif resp == 'createfail':
+                log(f"Aviso: Painel do revendedor CorePlay temporariamente sem cotas de teste (createfail). Tentando novamente...")
+                raise Exception("Painel de testes CorePlay temporariamente sem créditos (createfail)")
+            elif resp in ['emailnotperm', 'invalidemail', 'email_invalid']:
+                log(f"Aviso: Provedor de e-mail rejeitado pelo servidor ({resp}). Rotacionando...")
                 raise Exception(f"E-mail recusado pelo servidor: {resp}")
+            else:
+                log(f"Aviso: Servidor retornou '{resp}'. Rotacionando...")
+                raise Exception(f"Resposta inesperada do servidor: {resp}")
         except Exception as e:
             log(f"Tentativa {attempt+1}/4 falhou no gerador: {e}")
             if attempt < 3:
