@@ -54,14 +54,22 @@ def check_active(cred_file='creds.json'):
 # SISTEMA DE MULTI-PROVEDORES DE E-MAIL TEMPORÁRIO
 # ==============================================================================
 
-def get_temp_email():
-    """Gera um e-mail temporário com suporte a múltiplos provedores e fallback automático"""
-    log("Criando caixa de e-mail temporária (selecionando servidor de e-mail disponível)...")
-    # 1. Provedor Principal: mail.gw (domínio westcast-systems.com 100% aceito pelo CorePlay)
+def get_temp_email(attempt=0):
+    """Gera um e-mail temporario com nomes naturais e suporte a multiplos provedores"""
+    log(f"Criando caixa de e-mail temporaria (tentativa {attempt+1})...")
+    
+    first_names = ['carlos', 'marcos', 'felipe', 'rodrigo', 'pedro', 'lucas', 'bruno', 'gabriel', 'diego', 'rafael', 'andre', 'matheus', 'leonardo', 'thiago']
+    last_names = ['silva', 'santos', 'oliveira', 'souza', 'lima', 'pereira', 'costa', 'rodrigues', 'almeida', 'nascimento', 'araujo', 'melo', 'barbosa', 'ribeiro']
+    rand_user = f"{random.choice(first_names)}.{random.choice(last_names)}{random.randint(100, 999)}"
+
+    # 1. Provedores Hydra (mail.gw e mail.tm)
     hydra_providers = [
         {"name": "mail.gw", "base": "https://api.mail.gw"},
         {"name": "mail.tm", "base": "https://api.mail.tm"}
     ]
+    if attempt % 2 == 1:
+        hydra_providers.reverse()
+
     for prov in hydra_providers:
         try:
             p_name = prov["name"]
@@ -72,11 +80,9 @@ def get_temp_email():
             domains = [d['domain'] for d in (data if isinstance(data, list) else data.get('hydra:member', []))]
             if not domains:
                 continue
-            # Prioriza westcast-systems.com
-            domain = 'westcast-systems.com' if 'westcast-systems.com' in domains else random.choice(domains)
-
-            username = f'iptv{random.randint(10000, 99999)}'
-            email = f'{username}@{domain}'
+            
+            domain = 'westcast-systems.com' if ('westcast-systems.com' in domains and attempt == 0) else random.choice(domains)
+            email = f'{rand_user}@{domain}'
             password = f'Pass{random.randint(1000, 9999)}!Auto'
 
             create_data = json.dumps({"address": email, "password": password}).encode()
@@ -97,12 +103,12 @@ def get_temp_email():
                 "base": p_base
             }
         except Exception as e:
-            log(f"Aviso: Servidor de e-mail {prov['name']} falhou ({e}). Tentando próximo...")
+            log(f"Aviso: Servidor de e-mail {prov['name']} falhou ({e}). Tentando proximo...")
 
     # 2. Fallback: temp-mail.io
     try:
         req = urllib.request.Request('https://api.internal.temp-mail.io/api/v3/email/new', 
-            data=json.dumps({'min_name_length': 10, 'max_name_length': 10}).encode(),
+            data=json.dumps({'min_name_length': 10, 'max_name_length': 12}).encode(),
             headers={'Content-Type': 'application/json', 'User-Agent': UA})
         data = json.loads(urllib.request.urlopen(req, timeout=10).read().decode())
         email = data.get('email')
@@ -117,30 +123,33 @@ def get_temp_email():
     except Exception as e:
         log(f"Aviso no temp-mail.io: {e}")
 
-    raise Exception("Todos os servidores de e-mail temporário falharam ao criar conta.")
+    raise Exception("Todos os servidores de e-mail temporario falharam ao criar conta.")
 
 def generate_test(temp_email):
-    log("Enviando requisição de geração de teste com assinatura autêntica de navegador...")
+    log("Enviando requisicao de geracao de teste com assinatura autentica de navegador...")
+    target_urls = ['https://teste.coreplay.vc/', 'https://teste.coreplay.digital/']
+    
     for attempt in range(4):
+        target_url = target_urls[attempt % len(target_urls)]
+        domain_host = urllib.parse.urlparse(target_url).hostname
         try:
             cj = http.cookiejar.CookieJar()
             opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cj))
 
-            html = opener.open(urllib.request.Request('https://teste.coreplay.vc/',
+            html = opener.open(urllib.request.Request(target_url,
                 headers={'User-Agent': UA, 'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7'}),
                 timeout=15).read().decode('utf-8', errors='ignore')
 
             cp_sn_match = re.search(r'id="cp_sn"[^>]*value="([^"]+)"', html)
             if not cp_sn_match:
-                raise Exception("Token de segurança cp_sn não encontrado no site.")
+                raise Exception("Token de seguranca cp_sn nao encontrado no site.")
             cp_sn = cp_sn_match.group(1)
             device_id = str(uuid.uuid4())
 
             cj.set_cookie(Cookie(0, 'cp_device_id', device_id, None, False,
-                'teste.coreplay.vc', False, False, '/', True, False,
+                domain_host, False, False, '/', True, False,
                 int(time.time()) + 31536000, False, None, None, {}))
 
-            # Fingerprint SHA256 genuíno e consistente com o cp-attribution.js
             device_fp = hashlib.sha256(f'{UA}|{random.random()}|{device_id}'.encode()).hexdigest()
             ddd = random.choice(['11', '21', '31', '41', '51', '61', '71', '81', '85', '47', '48', '27', '82'])
             telefone = f'+55{ddd}9{random.randint(10000000, 99999999)}'
@@ -160,6 +169,10 @@ def generate_test(temp_email):
                 'codecs': 'h264,hevc,vp9,av1,aac,mp3,ac3,eac3', 'drm': 'widevine,playready'
             }
 
+            cj.set_cookie(Cookie(0, 'cp_attr', json.dumps(attrs), None, False,
+                domain_host, False, False, '/', True, False,
+                int(time.time()) + 31536000, False, None, None, {}))
+
             iptv_caps = {
                 'mse': True, 'hls': True, 'dash': True, 'eme': True,
                 'canPlayH264': 'probably', 'canPlayHevc': 'maybe', 'canPlayAac': 'probably'
@@ -167,7 +180,7 @@ def generate_test(temp_email):
 
             payload = {
                 'key': key, 'email': temp_email, 'pacote': '[1,2,3,5,6,7]',
-                'telefone': telefone, 'fingerprint': device_fp,
+                'telefone': telefone, 'fingerprint': '',
                 'cp_device_id': device_id, 'cp_device_fp': device_fp,
                 'cp_flow_tag': '',
                 'cp_device_attrs': json.dumps(attrs),
@@ -175,8 +188,8 @@ def generate_test(temp_email):
                 'cp_iptv_caps': json.dumps(iptv_caps),
                 'cp_hp': '', 'cp_sn': cp_sn, 'cp_jsp': cp_jsp,
                 'cp_attr_source_hint': 'direct', 'cp_attr_channel_group': 'Direct',
-                'cp_attr_landing_url': 'https://teste.coreplay.vc/',
-                'cp_attr_landing_host': 'teste.coreplay.vc',
+                'cp_attr_landing_url': target_url,
+                'cp_attr_landing_host': domain_host,
                 'cp_attr_device_type': 'desktop', 'cp_attr_os': 'Windows',
                 'cp_attr_browser': 'Chrome', 'cp_attr_language': 'pt-BR',
                 'cp_attr_screen': '1920x1080', 'cp_attr_visit_count': '1',
@@ -187,10 +200,10 @@ def generate_test(temp_email):
 
             time.sleep(2)
             data = urllib.parse.urlencode(payload).encode()
-            req = urllib.request.Request('https://teste.coreplay.vc/gerarteste', data=data, headers={
+            req = urllib.request.Request(f'{target_url}gerarteste', data=data, headers={
                 'User-Agent': UA,
-                'Referer': 'https://teste.coreplay.vc/',
-                'Origin': 'https://teste.coreplay.vc',
+                'Referer': target_url,
+                'Origin': target_url.rstrip('/'),
                 'X-Requested-With': 'XMLHttpRequest',
                 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
                 'Accept': '*/*',
@@ -204,15 +217,18 @@ def generate_test(temp_email):
             })
 
             resp = opener.open(req, timeout=20).read().decode('utf-8', errors='ignore').strip()
-            log(f"Resposta do gerador: {resp}")
+            log(f"Resposta do gerador ({domain_host}): {resp}")
             if resp == 'sendok':
                 return True
             else:
                 log(f"Aviso: Gerador recusou o e-mail com '{resp}'. Rotacionando provedor...")
                 raise Exception(f"E-mail recusado pelo servidor: {resp}")
         except Exception as e:
-            log(f"Tentativa falhou no gerador: {e}")
-            raise e
+            log(f"Tentativa {attempt+1}/4 falhou no gerador: {e}")
+            if attempt < 3:
+                time.sleep(5)
+            else:
+                raise e
 
     raise Exception(f"Falha ao gerar teste no CorePlay (última resposta: {resp if 'resp' in locals() else 'timeout'}).")
 
@@ -339,7 +355,7 @@ def generate_one_account(device_label):
     log(f"--> Iniciando geração para: {device_label.upper()}...")
     for run_attempt in range(3):
         try:
-            mail_account = get_temp_email()
+            mail_account = get_temp_email(attempt=run_attempt)
             generate_test(mail_account["email"])
             creds = read_email_credentials(mail_account)
             creds['device'] = device_label

@@ -14,21 +14,26 @@ _CACHE_TTL = 60  # Recalibra a cada 60 segundos em segundo plano
 _IS_FETCHING = {'tv': False, 'celular': False}
 
 def is_cred_valid(data):
-    """Verifica se a credencial tem menos de 3.5 horas de vida"""
-    if not data or not data.get('username') or not data.get('password'):
+    """Verifica se os dados da credencial possuem campos e estrutura minimamente validos"""
+    if not isinstance(data, dict):
+        return False
+    return bool(data.get('username') and data.get('password'))
+
+def is_cred_fresh(data, max_age=12600):
+    """Verifica se a credencial foi gerada ha menos de 3.5 horas (ciclo ideal de renovacao)"""
+    if not is_cred_valid(data):
         return False
     ts_str = data.get('updated_at') or data.get('generated_at')
     if not ts_str:
-        return False
+        return True
     try:
         clean = ts_str.replace('Z', '')
         dt = datetime.fromisoformat(clean)
         now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
         age = (now_utc - dt).total_seconds()
-        # Testes duram no máximo 4 horas. Se tem mais de 3.5h (12600s), está expirada!
-        return 0 <= age < 12600
+        return 0 <= age < max_age
     except Exception:
-        return False
+        return True
 
 def _fetch_from_github(filename='creds.json'):
     """Busca as credenciais mais recentes direto da API do GitHub (sem cache de 5 minutos do Fastly)"""
