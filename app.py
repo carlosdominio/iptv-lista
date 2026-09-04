@@ -292,9 +292,8 @@ def get_completa_celular():
 # ROTAS DINÂMICAS DE STREAMING (PROXY INTELIGENTE)
 # =========================================================================
 
-# Streams da TV (Mantém suporte a /live/<path> e /live/tv/<path>)
+# Streams da TV e Celular (Rotas específicas primeiro)
 @app.route('/live/tv/<path:stream_path>')
-@app.route('/live/<path:stream_path>')
 def proxy_live_tv(stream_path):
     creds = carregar_credenciais('tv')
     user = creds.get('username')
@@ -307,7 +306,6 @@ def proxy_live_tv(stream_path):
     resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
     return resp
 
-# Streams do Celular (/live/celular/<path>)
 @app.route('/live/celular/<path:stream_path>')
 def proxy_live_celular(stream_path):
     creds = carregar_credenciais('celular')
@@ -321,9 +319,17 @@ def proxy_live_celular(stream_path):
     resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
     return resp
 
+# Rota Legada /live/<stream_path> (Redireciona para a TV mantendo compatibilidade retroativa)
+@app.route('/live/<path:stream_path>')
+def proxy_live_legacy(stream_path):
+    if stream_path.startswith('celular/'):
+        return proxy_live_celular(stream_path[8:])
+    if stream_path.startswith('tv/'):
+        return proxy_live_tv(stream_path[3:])
+    return proxy_live_tv(stream_path)
+
 # Filmes
 @app.route('/movie/tv/<path:stream_path>')
-@app.route('/movie/<path:stream_path>')
 def proxy_movie_tv(stream_path):
     creds = carregar_credenciais('tv')
     user = creds.get('username')
@@ -345,9 +351,16 @@ def proxy_movie_celular(stream_path):
     resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
     return resp
 
+@app.route('/movie/<path:stream_path>')
+def proxy_movie_legacy(stream_path):
+    if stream_path.startswith('celular/'):
+        return proxy_movie_celular(stream_path[8:])
+    if stream_path.startswith('tv/'):
+        return proxy_movie_tv(stream_path[3:])
+    return proxy_movie_tv(stream_path)
+
 # Séries
 @app.route('/series/tv/<path:stream_path>')
-@app.route('/series/<path:stream_path>')
 def proxy_series_tv(stream_path):
     creds = carregar_credenciais('tv')
     user = creds.get('username')
@@ -368,6 +381,14 @@ def proxy_series_celular(stream_path):
     resp.headers['Access-Control-Allow-Origin'] = '*'
     resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
     return resp
+
+@app.route('/series/<path:stream_path>')
+def proxy_series_legacy(stream_path):
+    if stream_path.startswith('celular/'):
+        return proxy_series_celular(stream_path[8:])
+    if stream_path.startswith('tv/'):
+        return proxy_series_tv(stream_path[3:])
+    return proxy_series_tv(stream_path)
 
 # HLS Chunks Fallback
 @app.route('/hls/<path:stream_path>')
