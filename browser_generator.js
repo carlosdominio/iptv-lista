@@ -1,4 +1,6 @@
-const puppeteer = require('puppeteer');
+const puppeteer = require('puppeteer-extra');
+const StealthPlugin = require('puppeteer-extra-plugin-stealth');
+puppeteer.use(StealthPlugin());
 
 async function submitTrial(email, targetUrl = 'https://teste.coreplay.vc/') {
   if (!email) {
@@ -13,37 +15,22 @@ async function submitTrial(email, targetUrl = 'https://teste.coreplay.vc/') {
       '--disable-setuid-sandbox',
       '--disable-dev-shm-usage',
       '--disable-blink-features=AutomationControlled',
-      '--lang=pt-BR,pt'
+      '--incognito', // Simulate an incognito tab
+      '--lang=pt-BR,pt',
+      '--proxy-server=http://177.93.49.114:999'
     ]
   });
 
   try {
-    const page = await browser.newPage();
+    const context = await browser.createBrowserContext();
+    const page = await context.newPage();
+    
     await page.setViewport({ width: 1920, height: 1080 });
+    // Use a solid Windows user agent
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36');
-    await page.emulateTimezone('America/Maceio');
+    await page.emulateTimezone('America/Sao_Paulo');
 
-    await page.evaluateOnNewDocument(() => {
-      Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
-      window.chrome = { runtime: {} };
-      Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
-      Object.defineProperty(navigator, 'languages', { get: () => ['pt-BR', 'pt', 'en-US', 'en'] });
-
-      const getParameterProto = WebGLRenderingContext.prototype.getParameter;
-      WebGLRenderingContext.prototype.getParameter = function(parameter) {
-        if (parameter === 37445) return 'Google Inc. (Intel)';
-        if (parameter === 37446) return 'ANGLE (Intel, Intel(R) UHD Graphics 620 Direct3D11 vs_5_0 ps_5_0, D3D11)';
-        return getParameterProto.apply(this, arguments);
-      };
-      if (typeof WebGL2RenderingContext !== 'undefined') {
-        const getParameter2Proto = WebGL2RenderingContext.prototype.getParameter;
-        WebGL2RenderingContext.prototype.getParameter = function(parameter) {
-          if (parameter === 37445) return 'Google Inc. (Intel)';
-          if (parameter === 37446) return 'ANGLE (Intel, Intel(R) UHD Graphics 620 Direct3D11 vs_5_0 ps_5_0, D3D11)';
-          return getParameter2Proto.apply(this, arguments);
-        };
-      }
-    });
+    // Remove old manual stealth overrides, letting puppeteer-extra-plugin-stealth do its job.
 
     let apiResponse = null;
     page.on('response', async (res) => {
@@ -56,18 +43,18 @@ async function submitTrial(email, targetUrl = 'https://teste.coreplay.vc/') {
 
     await page.goto(targetUrl, { waitUntil: 'networkidle2', timeout: 30000 });
     await page.waitForSelector('#email', { timeout: 10000 });
-    await page.type('#email', email, { delay: 40 });
+    await page.type('#email', email, { delay: 60 }); // Slower typing for humanity
 
     const ddds = ['82', '11', '21', '31', '41', '51', '71', '81', '85'];
     const ddd = ddds[Math.floor(Math.random() * ddds.length)];
-    const num = '9' + Math.floor(70000000 + Math.random() * 29999999);
+    const num = '9' + Math.floor(70000000 + Math.random() * 29999999); // E.g., 987654321
     const tel = `(${ddd}) ${num.slice(0, 5)}-${num.slice(5)}`;
-    await page.type('#telefone', tel, { delay: 40 });
+    await page.type('#telefone', tel, { delay: 60 });
 
-    await new Promise(r => setTimeout(r, 3000));
+    await new Promise(r => setTimeout(r, 4000)); // wait a bit more like a user reading
     await page.click('#gerar_user');
 
-    for (let i = 0; i < 30; i++) {
+    for (let i = 0; i < 40; i++) {
       if (apiResponse) break;
       await new Promise(r => setTimeout(r, 500));
     }
@@ -77,6 +64,10 @@ async function submitTrial(email, targetUrl = 'https://teste.coreplay.vc/') {
       email: email,
       phone: tel
     }));
+    
+    if (apiResponse === 'createfail' || !apiResponse) {
+      await page.screenshot({ path: 'createfail_screenshot.png' });
+    }
   } catch (err) {
     console.log(JSON.stringify({ status: 'error', message: err.message }));
   } finally {
