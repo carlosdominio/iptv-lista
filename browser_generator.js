@@ -10,14 +10,14 @@ async function submitTrial(email, targetUrl = 'https://teste.coreplay.vc/') {
 
   const browser = await puppeteer.launch({
     headless: 'new',
+    executablePath: '/home/carlosrikelinux/.cache/puppeteer/chrome/linux-152.0.7977.75/chrome-linux64/chrome',
     args: [
       '--no-sandbox',
       '--disable-setuid-sandbox',
       '--disable-dev-shm-usage',
       '--disable-blink-features=AutomationControlled',
-      '--incognito', // Simulate an incognito tab
-      '--lang=pt-BR,pt',
-      '--proxy-server=http://177.93.49.114:999'
+      '--incognito',
+      '--lang=pt-BR,pt'
     ]
   });
 
@@ -25,14 +25,19 @@ async function submitTrial(email, targetUrl = 'https://teste.coreplay.vc/') {
     const context = await browser.createBrowserContext();
     const page = await context.newPage();
     
-    await page.setViewport({ width: 1920, height: 1080 });
-    // Use a solid Windows user agent
+    await page.setViewport({ width: 1366, height: 768 });
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36');
-    await page.emulateTimezone('America/Sao_Paulo');
-
-    // Remove old manual stealth overrides, letting puppeteer-extra-plugin-stealth do its job.
+    await page.emulateTimezone('America/Maceio');
 
     let apiResponse = null;
+    let postData = null;
+
+    page.on('request', (req) => {
+      if (req.url().includes('/gerarteste') && req.method() === 'POST') {
+        postData = req.postData();
+      }
+    });
+
     page.on('response', async (res) => {
       if (res.url().includes('/gerarteste')) {
         try {
@@ -43,18 +48,41 @@ async function submitTrial(email, targetUrl = 'https://teste.coreplay.vc/') {
 
     await page.goto(targetUrl, { waitUntil: 'networkidle2', timeout: 30000 });
     await page.waitForSelector('#email', { timeout: 10000 });
-    await page.type('#email', email, { delay: 60 }); // Slower typing for humanity
 
-    const ddds = ['82', '11', '21', '31', '41', '51', '71', '81', '85'];
+    // Move mouse and click email input
+    await page.click('#email');
+    await page.type('#email', email, { delay: 50 });
+
+    // Focus phone input and type clean digits (e.g. DDD 82 + 9 + 8 digits)
+    const ddds = ['82', '11', '71', '81', '85'];
     const ddd = ddds[Math.floor(Math.random() * ddds.length)];
-    const num = '9' + Math.floor(70000000 + Math.random() * 29999999); // E.g., 987654321
-    const tel = `(${ddd}) ${num.slice(0, 5)}-${num.slice(5)}`;
-    await page.type('#telefone', tel, { delay: 60 });
+    const num = '9' + Math.floor(80000000 + Math.random() * 19999999);
+    const cleanPhone = `${ddd}${num}`;
 
-    await new Promise(r => setTimeout(r, 4000)); // wait a bit more like a user reading
+    await page.click('#telefone');
+    await page.type('#telefone', cleanPhone, { delay: 50 });
+
+    // Trigger blur/change events
+    await page.evaluate(() => {
+      const tel = document.getElementById('telefone');
+      if (tel) {
+        tel.dispatchEvent(new Event('change', { bubbles: true }));
+        tel.dispatchEvent(new Event('blur', { bubbles: true }));
+      }
+      const em = document.getElementById('email');
+      if (em) {
+        em.dispatchEvent(new Event('change', { bubbles: true }));
+        em.dispatchEvent(new Event('blur', { bubbles: true }));
+      }
+    });
+
+    await new Promise(r => setTimeout(r, 2000));
+
+    // Click submit button
     await page.click('#gerar_user');
 
-    for (let i = 0; i < 40; i++) {
+    // Wait for response up to 25 seconds
+    for (let i = 0; i < 50; i++) {
       if (apiResponse) break;
       await new Promise(r => setTimeout(r, 500));
     }
@@ -62,11 +90,12 @@ async function submitTrial(email, targetUrl = 'https://teste.coreplay.vc/') {
     console.log(JSON.stringify({
       status: apiResponse || 'timeout',
       email: email,
-      phone: tel
+      phone: cleanPhone,
+      postData: postData
     }));
-    
-    if (apiResponse === 'createfail' || !apiResponse) {
-      await page.screenshot({ path: 'createfail_screenshot.png' });
+
+    if (apiResponse !== 'sendok') {
+      await page.screenshot({ path: 'browser_result.png' });
     }
   } catch (err) {
     console.log(JSON.stringify({ status: 'error', message: err.message }));

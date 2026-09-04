@@ -126,69 +126,122 @@ def get_temp_email(attempt=0):
     raise Exception("Todos os servidores de e-mail temporario falharam ao criar conta.")
 
 def generate_test(temp_email):
-    log("Enviando requisicao de geracao de teste com bypass de WhatsApp (Python puro)...")
-    target_url = 'https://teste.coreplay.vc/'
+    log("Enviando requisicao de geracao de teste com assinatura autentica de navegador...")
+    target_urls = ['https://teste.coreplay.vc/', 'https://teste.coreplay.digital/']
     
-    for attempt in range(10):
+    for attempt in range(6):
+        target_url = target_urls[attempt % len(target_urls)]
+        domain_host = urllib.parse.urlparse(target_url).hostname
         try:
             cj = http.cookiejar.CookieJar()
             opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cj))
-            html = opener.open(urllib.request.Request(target_url, headers={'User-Agent': UA}), timeout=15).read().decode()
 
-            m_sn = re.search(r'id=\"cp_sn\"[^>]*value=\"([^\"]+)\"', html)
-            cp_sn = m_sn.group(1) if m_sn else ''
+            html = opener.open(urllib.request.Request(target_url,
+                headers={'User-Agent': UA, 'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7'}),
+                timeout=15).read().decode('utf-8', errors='ignore')
 
-            m_jk = re.search(r'__CP_JK\s*=\s*(\[[^\]]+\])', html)
-            jk_parts = json.loads(m_jk.group(1)) if m_jk else ["T7kR","2mN","p9Qx"]
-            js_key = "".join(jk_parts)
-
+            cp_sn_match = re.search(r'id="cp_sn"[^>]*value="([^"]+)"', html)
+            if not cp_sn_match:
+                raise Exception("Token de seguranca cp_sn nao encontrado no site.")
+            cp_sn = cp_sn_match.group(1)
             device_id = str(uuid.uuid4())
-            device_fp = hashlib.md5(f'{device_id}:{random.random()}'.encode()).hexdigest()
+
+            cj.set_cookie(Cookie(0, 'cp_device_id', device_id, None, False,
+                domain_host, False, False, '/', True, False,
+                int(time.time()) + 31536000, False, None, None, {}))
+
+            device_fp = hashlib.sha256(f'{UA}|{random.random()}|{device_id}'.encode()).hexdigest()
+            ddd = random.choice(['11', '21', '31', '41', '51', '61', '71', '81', '85', '47', '48', '27', '82'])
+            telefone = f'+55{ddd}9{random.randint(10000000, 99999999)}'
+
             key = hashlib.md5(base64.b64encode(temp_email.encode())).hexdigest()
-            cp_jsp = hashlib.md5(f'{cp_sn}:{device_id}:{js_key}'.encode()).hexdigest()
+            cp_jsp = hashlib.md5(f'{cp_sn}:{device_id}:Cp9xQ2m7Ka'.encode()).hexdigest()
 
-            # Generate a highly probable active WhatsApp number in SP
-            middle = f"{random.randint(0,999):03d}"
-            end = f"{random.randint(0,9999):04d}"
-            telefone = f"(11) 99{middle[0:3]}-{end}"
-
-            payload = {
-                'key': key, 'email': temp_email, 'pacote': '[1,2,3,5,6,7]', 'telefone': telefone,
-                'fingerprint': device_fp, 'cp_device_id': device_id, 'cp_device_fp': device_fp, 'cp_flow_tag': '',
-                'cp_device_attrs': '{}', 'cp_bot_flags': '[]', 'cp_iptv_caps': '{}', 'cp_hp': '', 'cp_sn': cp_sn, 'cp_jsp': cp_jsp,
-                'cp_attr_source_hint': 'direct'
+            attrs = {
+                'canvasHash': hashlib.md5(f'canvas{random.random()}'.encode()).hexdigest()[:16],
+                'webglVendor': 'Google Inc. (Intel)',
+                'webglRenderer': 'ANGLE (Intel, Intel(R) UHD Graphics 620 Direct3D11 vs_5_0 ps_5_0, D3D11)',
+                'audioHash': hashlib.md5(f'audio{random.random()}'.encode()).hexdigest()[:16],
+                'cores': 8, 'memoria': 8, 'touch': 0, 'tela': '1920x1080x24@1',
+                'tz': 'America/Sao_Paulo', 'idioma': 'pt-BR,pt,en-US,en', 'plataforma': 'Win32',
+                'modelo': '',
+                'fontes': 'Arial,Calibri,Cambria,Consolas,Courier New,Georgia,Helvetica,Impact,Segoe UI,Tahoma,Times New Roman,Verdana',
+                'codecs': 'h264,hevc,vp9,av1,aac,mp3,ac3,eac3', 'drm': 'widevine,playready'
             }
 
-            data = urllib.parse.urlencode(payload).encode()
-            post_req = urllib.request.Request(f'{target_url}gerarteste', data=data, headers={
-                'User-Agent': UA, 'Referer': target_url, 'Origin': 'https://teste.coreplay.vc', 'X-Requested-With': 'XMLHttpRequest'
-            })
-            
-            res = opener.open(post_req, timeout=15).read().decode().strip()
-            log(f"Attempt {attempt+1}/10 - Phone: {telefone} - Response: {res}")
-            
-            if res == 'sendok':
-                log("WhatsApp bypass successful!")
-                return True
-            elif res == 'jatestou':
-                log("Number already tested, retrying another...")
-                time.sleep(1)
-                continue
-            elif res == 'createfail':
-                # Number probably doesn't exist on WhatsApp or IP is rate-limited.
-                time.sleep(1)
-                continue
-            elif res in ['emailnotperm', 'invalidemail']:
-                log("Email domain blocked by server!")
-                raise Exception("E-mail bloqueado")
-            else:
-                time.sleep(1)
-                
-        except Exception as e:
-            log(f"Erro na tentativa {attempt+1}: {e}")
+            cj.set_cookie(Cookie(0, 'cp_attr', json.dumps(attrs), None, False,
+                domain_host, False, False, '/', True, False,
+                int(time.time()) + 31536000, False, None, None, {}))
+
+            iptv_caps = {
+                'mse': True, 'hls': True, 'dash': True, 'eme': True,
+                'canPlayH264': 'probably', 'canPlayHevc': 'maybe', 'canPlayAac': 'probably'
+            }
+
+            payload = {
+                'key': key, 'email': temp_email, 'pacote': '[1,2,3,5,6,7]',
+                'telefone': telefone, 'fingerprint': '',
+                'cp_device_id': device_id, 'cp_device_fp': device_fp,
+                'cp_flow_tag': '',
+                'cp_device_attrs': json.dumps(attrs),
+                'cp_bot_flags': '[]',
+                'cp_iptv_caps': json.dumps(iptv_caps),
+                'cp_hp': '', 'cp_sn': cp_sn, 'cp_jsp': cp_jsp,
+                'cp_attr_source_hint': 'direct', 'cp_attr_channel_group': 'Direct',
+                'cp_attr_landing_url': target_url,
+                'cp_attr_landing_host': domain_host,
+                'cp_attr_device_type': 'desktop', 'cp_attr_os': 'Windows',
+                'cp_attr_browser': 'Chrome', 'cp_attr_language': 'pt-BR',
+                'cp_attr_screen': '1920x1080', 'cp_attr_visit_count': '1',
+                'cp_attr_submit_ms': '3842', 'cp_attr_interactions': '14',
+                'cp_attr_email_keys': str(len(temp_email)),
+                'cp_attr_phone_keys': str(len(telefone))
+            }
+
             time.sleep(2)
-            
-    raise Exception("Falha após tentar múltiplos números. Possível bloqueio de IP.")
+            data = urllib.parse.urlencode(payload).encode()
+            req = urllib.request.Request(f'{target_url}gerarteste', data=data, headers={
+                'User-Agent': UA,
+                'Referer': target_url,
+                'Origin': target_url.rstrip('/'),
+                'X-Requested-With': 'XMLHttpRequest',
+                'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+                'Accept': '*/*',
+                'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
+                'Sec-Ch-Ua': '"Not/A)Brand";v="8", "Chromium";v="126", "Google Chrome";v="126"',
+                'Sec-Ch-Ua-Mobile': '?0',
+                'Sec-Ch-Ua-Platform': '"Windows"',
+                'Sec-Fetch-Dest': 'empty',
+                'Sec-Fetch-Mode': 'cors',
+                'Sec-Fetch-Site': 'same-origin'
+            })
+
+            resp = opener.open(req, timeout=20).read().decode('utf-8', errors='ignore').strip()
+            log(f"Resposta do gerador ({domain_host}) [tentativa {attempt+1}]: {resp}")
+            if resp == 'sendok':
+                return True
+            elif resp == 'jatestou':
+                log("Numero ja testado anteriormente, tentando outro...")
+                time.sleep(1)
+                continue
+            elif resp == 'createfail':
+                log(f"Aviso: Servidor retornou createfail (cota ou restricao). Tentando novamente...")
+                time.sleep(2)
+                continue
+            elif resp in ['emailnotperm', 'invalidemail', 'email_invalid']:
+                log(f"Aviso: Provedor de e-mail rejeitado pelo servidor ({resp}). Rotacionando...")
+                raise Exception(f"E-mail recusado pelo servidor: {resp}")
+            else:
+                log(f"Aviso: Servidor retornou '{resp}'. Rotacionando...")
+                time.sleep(2)
+        except Exception as e:
+            log(f"Tentativa {attempt+1}/6 falhou no gerador: {e}")
+            if attempt < 5:
+                time.sleep(3)
+            else:
+                raise e
+
+    raise Exception("Falha ao gerar teste no CorePlay apos todas as tentativas.")
 
 def read_email_credentials(mail_account, max_attempts=12):
     """Lê as credenciais da caixa de e-mail temporária com suporte a múltiplos provedores"""
