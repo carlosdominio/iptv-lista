@@ -14,12 +14,12 @@ UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like 
 def log(msg):
     print(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}", flush=True)
 
-def check_active():
-    """Verifica se já temos credenciais válidas salvas recentemente"""
-    if not os.path.exists('creds.json'):
+def check_active(cred_file='creds.json'):
+    """Verifica se já temos credenciais válidas salvas recentemente no arquivo especificado"""
+    if not os.path.exists(cred_file):
         return False
     try:
-        with open('creds.json') as f:
+        with open(cred_file) as f:
             creds = json.load(f)
         user = creds.get('username')
         pwd = creds.get('password')
@@ -34,20 +34,20 @@ def check_active():
                 now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
                 age_seconds = (now_utc - dt).total_seconds()
                 
-                # Testes duram 6 horas (21600s). Se tem menos de 3.5 horas (12600s), ainda está ativo
+                # Testes duram 4-6 horas. Se tem menos de 3.5 horas (12600s), ainda está ativo
                 if 0 <= age_seconds < 12600:
                     remaining_min = (21600 - age_seconds) / 60
-                    log(f"Conta '{user}' gerada há {age_seconds/60:.0f} min (válida por mais ~{remaining_min:.0f} min). Nada a fazer.")
+                    log(f"[{cred_file}] Conta '{user}' gerada há {age_seconds/60:.0f} min (válida por mais ~{remaining_min:.0f} min).")
                     return True
                 else:
-                    log(f"Conta '{user}' gerada há {age_seconds/60:.0f} min (atingiu o ciclo de 3.5h). Gerando nova...")
+                    log(f"[{cred_file}] Conta '{user}' gerada há {age_seconds/60:.0f} min (atingiu o ciclo de 3.5h).")
                     return False
             except Exception as e:
-                log(f"Aviso ao calcular tempo da conta: {e}")
+                log(f"Aviso ao calcular tempo da conta em {cred_file}: {e}")
 
         return False
     except Exception as e:
-        log(f"Aviso ao ler creds.json: {e}")
+        log(f"Aviso ao ler {cred_file}: {e}")
         return False
 
 # ==============================================================================
@@ -57,14 +57,11 @@ def check_active():
 def get_temp_email():
     """Gera um e-mail temporário com suporte a múltiplos provedores e fallback automático"""
     log("Criando caixa de e-mail temporária (selecionando servidor de e-mail disponível)...")
-    
-    # Provedores baseados na API REST do Hydra/Mail.tm (mail.tm e mail.gw)
+    # 1. Provedor Principal: mail.gw (domínio westcast-systems.com 100% aceito pelo CorePlay)
     hydra_providers = [
         {"name": "mail.gw", "base": "https://api.mail.gw"},
         {"name": "mail.tm", "base": "https://api.mail.tm"}
     ]
-    random.shuffle(hydra_providers)
-
     for prov in hydra_providers:
         try:
             p_name = prov["name"]
@@ -75,7 +72,8 @@ def get_temp_email():
             domains = [d['domain'] for d in (data if isinstance(data, list) else data.get('hydra:member', []))]
             if not domains:
                 continue
-            domain = random.choice(domains)
+            # Prioriza westcast-systems.com
+            domain = 'westcast-systems.com' if 'westcast-systems.com' in domains else random.choice(domains)
 
             username = f'iptv{random.randint(10000, 99999)}'
             email = f'{username}@{domain}'
@@ -101,20 +99,21 @@ def get_temp_email():
         except Exception as e:
             log(f"Aviso: Servidor de e-mail {prov['name']} falhou ({e}). Tentando próximo...")
 
-    # Fallback 3: temp-mail.io
+    # 2. Fallback: temp-mail.io
     try:
         req = urllib.request.Request('https://api.internal.temp-mail.io/api/v3/email/new', 
             data=json.dumps({'min_name_length': 10, 'max_name_length': 10}).encode(),
             headers={'Content-Type': 'application/json', 'User-Agent': UA})
         data = json.loads(urllib.request.urlopen(req, timeout=10).read().decode())
         email = data.get('email')
-        log(f"E-mail gerado via temp-mail.io: {email}")
-        return {
-            "provider": "tempmailio",
-            "email": email,
-            "token": data.get('token'),
-            "base": "https://api.internal.temp-mail.io/api/v3"
-        }
+        if email:
+            log(f"E-mail gerado via temp-mail.io: {email}")
+            return {
+                "provider": "tempmailio",
+                "email": email,
+                "token": data.get('token'),
+                "base": "https://api.internal.temp-mail.io/api/v3"
+            }
     except Exception as e:
         log(f"Aviso no temp-mail.io: {e}")
 
@@ -209,11 +208,11 @@ def generate_test(temp_email):
             if resp == 'sendok':
                 return True
             else:
-                log(f"Aviso: Gerador retornou '{resp}'. Aguardando 6s para tentar novamente...")
-                time.sleep(6)
+                log(f"Aviso: Gerador recusou o e-mail com '{resp}'. Rotacionando provedor...")
+                raise Exception(f"E-mail recusado pelo servidor: {resp}")
         except Exception as e:
-            log(f"Tentativa {attempt+1}/4 falhou no gerador: {e}. Aguardando 6s...")
-            time.sleep(6)
+            log(f"Tentativa falhou no gerador: {e}")
+            raise e
 
     raise Exception(f"Falha ao gerar teste no CorePlay (última resposta: {resp if 'resp' in locals() else 'timeout'}).")
 
@@ -322,8 +321,8 @@ def sync_to_github():
         git config user.name "IPTV Cloud Bot"
         git config user.email "bot@render.com"
         git remote set-url origin "{remote_url}" 2>/dev/null || git remote add origin "{remote_url}"
-        git add creds.json
-        git commit -m "Auto-sincronizacao creds.json: $(date -u '+%Y-%m-%d %H:%M:%S UTC')" || true
+        git add creds.json creds_tv.json creds_celular.json canais_tv.m3u canais_celular.m3u
+        git commit -m "Auto-sincronizacao multi-contas: $(date -u '+%Y-%m-%d %H:%M:%S UTC')" || true
         git pull --rebase origin main 2>/dev/null || true
         git push --force origin main
         """
@@ -335,32 +334,70 @@ def sync_to_github():
     except Exception as e:
         log(f"Aviso no git sync: {e}")
 
-def main(force=False):
-    log("=== Início do Processo de Auto-Renovação ===")
-    
-    if not force and check_active():
-        log("✅ Credenciais atuais válidas e ativas. Nada a fazer.")
-        return
-
+def generate_one_account(device_label):
+    """Gera uma conta de teste individual com fingerprint e e-mail únicos"""
+    log(f"--> Iniciando geração para: {device_label.upper()}...")
     for run_attempt in range(3):
         try:
             mail_account = get_temp_email()
             generate_test(mail_account["email"])
             creds = read_email_credentials(mail_account)
-
-            with open('creds.json', 'w', encoding='utf-8') as f:
-                json.dump(creds, f, indent=2)
-
-            sync_to_github()
-            log("=== Processo Finalizado com Sucesso ===")
-            return
+            creds['device'] = device_label
+            return creds
         except Exception as e:
-            log(f"Ciclo {run_attempt+1}/3 falhou: {e}")
+            log(f"[{device_label.upper()}] Tentativa {run_attempt+1}/3 falhou: {e}")
             if run_attempt < 2:
-                log("Aguardando 10s para tentar com outro servidor de e-mail...")
+                log("Aguardando 10s para tentar com outro provedor de e-mail...")
                 time.sleep(10)
             else:
                 raise e
+
+def main(force=False):
+    log("=== Início do Processo de Auto-Renovação Multi-Dispositivo ===")
+    
+    need_tv = force or not check_active('creds_tv.json')
+    need_celular = force or not check_active('creds_celular.json')
+    
+    if not need_tv and not need_celular:
+        log("✅ Todas as contas (TV e Celular) estão válidas e ativas. Nada a fazer.")
+        return
+
+    updated_any = False
+
+    # 1. Gerar Conta da TV Box (se necessário)
+    if need_tv:
+        try:
+            creds_tv = generate_one_account('tv')
+            with open('creds_tv.json', 'w', encoding='utf-8') as f:
+                json.dump(creds_tv, f, indent=2)
+            # Salva também em creds.json para manter compatibilidade retroativa
+            with open('creds.json', 'w', encoding='utf-8') as f:
+                json.dump(creds_tv, f, indent=2)
+            updated_any = True
+            log("✅ Conta TV Box gerada e salva com sucesso!")
+        except Exception as e:
+            log(f"❌ Falha ao gerar conta TV: {e}")
+
+    # 2. Intervalo de segurança humano (30 a 45 segundos) para evitar detecção no servidor
+    if need_tv and need_celular:
+        wait_s = random.randint(30, 45)
+        log(f"Aguardando {wait_s}s de intervalo de segurança humano antes de gerar conta do Celular...")
+        time.sleep(wait_s)
+
+    # 3. Gerar Conta do Celular (se necessário)
+    if need_celular:
+        try:
+            creds_celular = generate_one_account('celular')
+            with open('creds_celular.json', 'w', encoding='utf-8') as f:
+                json.dump(creds_celular, f, indent=2)
+            updated_any = True
+            log("✅ Conta Celular gerada e salva com sucesso!")
+        except Exception as e:
+            log(f"❌ Falha ao gerar conta Celular: {e}")
+
+    if updated_any:
+        sync_to_github()
+        log("=== Processo Multi-Dispositivo Finalizado com Sucesso ===")
 
 if __name__ == '__main__':
     force_arg = '--force' in sys.argv

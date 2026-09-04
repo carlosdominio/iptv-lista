@@ -5,13 +5,13 @@ import renovar
 import urllib.request
 
 # =========================================================================
-# CACHE EM MEMÓRIA RAM ULTRA-RÁPIDO COM VALIDAÇÃO DE EXPIRAÇÃO
+# CACHE EM MEMÓRIA RAM MULTI-DISPOSITIVO (TV BOX + CELULAR)
 # =========================================================================
-_CACHED_CREDS = {}
-_LAST_FETCH_TIME = 0
+_CACHED_CREDS = {'tv': {}, 'celular': {}}
+_LAST_FETCH_TIME = {'tv': 0, 'celular': 0}
 _CACHE_LOCK = threading.Lock()
 _CACHE_TTL = 60  # Recalibra a cada 60 segundos em segundo plano
-_IS_FETCHING = False
+_IS_FETCHING = {'tv': False, 'celular': False}
 
 def is_cred_valid(data):
     """Verifica se a credencial tem menos de 3.5 horas de vida"""
@@ -30,11 +30,11 @@ def is_cred_valid(data):
     except Exception:
         return False
 
-def _fetch_from_github():
+def _fetch_from_github(filename='creds.json'):
     """Busca as credenciais mais recentes direto da API do GitHub (sem cache de 5 minutos do Fastly)"""
     # 1. Tentar via API oficial do GitHub (bypass total de cache)
     try:
-        url_api = "https://api.github.com/repos/carlosdominio/iptv-lista/contents/creds.json"
+        url_api = f"https://api.github.com/repos/carlosdominio/iptv-lista/contents/{filename}"
         req = urllib.request.Request(url_api, headers={'User-Agent': 'Mozilla/5.0'})
         with urllib.request.urlopen(req, timeout=3) as r:
             res_json = json.loads(r.read().decode())
@@ -46,7 +46,7 @@ def _fetch_from_github():
 
     # 2. Fallback via Raw caso a API falhe ou dê rate-limit
     try:
-        url_raw = f"https://raw.githubusercontent.com/carlosdominio/iptv-lista/main/creds.json?t={int(time.time())}"
+        url_raw = f"https://raw.githubusercontent.com/carlosdominio/iptv-lista/main/{filename}?t={int(time.time())}"
         req = urllib.request.Request(url_raw, headers={
             'User-Agent': 'Mozilla/5.0',
             'Cache-Control': 'no-cache, no-store, must-revalidate',
@@ -60,9 +60,18 @@ def _fetch_from_github():
         pass
     return None
 
-def _fetch_from_disk():
+def _fetch_from_disk(filename='creds.json'):
     """Lê as credenciais salvas no disco local (apenas se ainda forem válidas)"""
-    if os.path.exists('creds.json'):
+    if os.path.exists(filename):
+        try:
+            with open(filename, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                if is_cred_valid(data):
+                    return data
+        except Exception:
+            pass
+    # Fallback para creds.json se o arquivo do dispositivo específico ainda não existir
+    if filename != 'creds.json' and os.path.exists('creds.json'):
         try:
             with open('creds.json', 'r', encoding='utf-8') as f:
                 data = json.load(f)
@@ -72,76 +81,80 @@ def _fetch_from_disk():
             pass
     return None
 
-def atualizar_credenciais_background():
-    """Atualiza as credenciais em segundo plano sem travar a reprodução do usuário"""
+def atualizar_credenciais_background(device='tv'):
+    """Atualiza as credenciais de um dispositivo específico em segundo plano sem travar a reprodução"""
     global _CACHED_CREDS, _LAST_FETCH_TIME, _IS_FETCHING
-    if _IS_FETCHING:
+    if _IS_FETCHING[device]:
         return
-    _IS_FETCHING = True
+    _IS_FETCHING[device] = True
+    filename = f"creds_{device}.json" if device != 'tv' else "creds_tv.json"
     try:
-        data = _fetch_from_github()
+        data = _fetch_from_github(filename)
         if not data:
-            data = _fetch_from_disk()
+            data = _fetch_from_disk(filename)
+        if not data and device == 'tv':
+            data = _fetch_from_github('creds.json') or _fetch_from_disk('creds.json')
+
         if data and data.get('username') and data.get('password'):
             with _CACHE_LOCK:
-                _CACHED_CREDS = data
-                _LAST_FETCH_TIME = time.time()
+                _CACHED_CREDS[device] = data
+                _LAST_FETCH_TIME[device] = time.time()
             try:
-                with open('creds.json', 'w', encoding='utf-8') as f:
+                with open(filename, 'w', encoding='utf-8') as f:
                     json.dump(data, f, indent=2)
             except Exception:
                 pass
     except Exception:
         pass
     finally:
-        _IS_FETCHING = False
+        _IS_FETCHING[device] = False
 
-def carregar_credenciais():
-    """Retorna instantaneamente da memória RAM (< 1ms).
-    Garante que nunca entrega conta expirada ou antiga."""
+def carregar_credenciais(device='tv'):
+    """Retorna instantaneamente da memória RAM (< 1ms) para o dispositivo especificado ('tv' ou 'celular')."""
     global _CACHED_CREDS, _LAST_FETCH_TIME
 
     now = time.time()
+    filename = f"creds_{device}.json" if device != 'tv' else "creds_tv.json"
 
     # 1. Se já está na memória e dentro do TTL (60s) E ainda é válida, retorna na hora
     with _CACHE_LOCK:
-        if _CACHED_CREDS and (now - _LAST_FETCH_TIME < _CACHE_TTL) and is_cred_valid(_CACHED_CREDS):
-            return _CACHED_CREDS
+        cached = _CACHED_CREDS.get(device, {})
+        last_t = _LAST_FETCH_TIME.get(device, 0)
+        if cached and (now - last_t < _CACHE_TTL) and is_cred_valid(cached):
+            return cached
 
     # 2. Se temos cache válido mas passou de 60s, dispara atualização assíncrona e retorna o cache
-    if _CACHED_CREDS and is_cred_valid(_CACHED_CREDS):
-        threading.Thread(target=atualizar_credenciais_background, daemon=True).start()
-        return _CACHED_CREDS
+    cached = _CACHED_CREDS.get(device, {})
+    if cached and is_cred_valid(cached):
+        threading.Thread(target=atualizar_credenciais_background, args=(device,), daemon=True).start()
+        return cached
 
     # 3. Se não há cache válido na memória (início a frio), tenta ler do disco (se for válida)
-    disk_data = _fetch_from_disk()
+    disk_data = _fetch_from_disk(filename)
     if disk_data:
         with _CACHE_LOCK:
-            _CACHED_CREDS = disk_data
-            _LAST_FETCH_TIME = now
-        threading.Thread(target=atualizar_credenciais_background, daemon=True).start()
-        return _CACHED_CREDS
+            _CACHED_CREDS[device] = disk_data
+            _LAST_FETCH_TIME[device] = now
+        threading.Thread(target=atualizar_credenciais_background, args=(device,), daemon=True).start()
+        return disk_data
 
     # 4. Se o disco está expirado ou vazio, busca sincronicamente do GitHub imediatamente
-    gh_data = _fetch_from_github()
+    gh_data = _fetch_from_github(filename)
     if gh_data:
         with _CACHE_LOCK:
-            _CACHED_CREDS = gh_data
-            _LAST_FETCH_TIME = now
+            _CACHED_CREDS[device] = gh_data
+            _LAST_FETCH_TIME[device] = now
         try:
-            with open('creds.json', 'w', encoding='utf-8') as f:
+            with open(filename, 'w', encoding='utf-8') as f:
                 json.dump(gh_data, f, indent=2)
         except Exception:
             pass
-        return _CACHED_CREDS
+        return gh_data
 
-    # 5. Último recurso se o GitHub estiver fora: retorna o que tiver (mesmo que antigo)
-    if os.path.exists('creds.json'):
-        try:
-            with open('creds.json', 'r', encoding='utf-8') as f:
-                return json.load(f)
-        except Exception:
-            pass
+    # 5. Último recurso: retorna o arquivo creds.json legado
+    fallback = _fetch_from_disk('creds.json')
+    if fallback:
+        return fallback
 
     return {}
 
@@ -150,21 +163,31 @@ app = Flask(__name__)
 IS_RUNNING = False
 LOCK = threading.Lock()
 
+# =========================================================================
+# PÁGINA INICIAL COM TODOS OS LINKS ORGANIZADOS POR DISPOSITIVO
+# =========================================================================
 @app.route('/')
 def home():
-    creds = carregar_credenciais()
+    creds_tv = carregar_credenciais('tv')
+    creds_cel = carregar_credenciais('celular')
     return jsonify({
         "status": "online",
-        "servico": "Auto-Renovador IPTV com Inteligência de Streaming Dinâmico",
-        "usuario_atual": creds.get("username", "N/A"),
-        "atualizado_em": creds.get("updated_at") or creds.get("generated_at") or "N/A",
-        "links": {
-            "canais_brasil": "/canais_brasil.m3u",
-            "canais_todos": "/canais.m3u",
-            "lista_completa": "/completa.m3u",
-            "guia_epg": "/epg.xml",
-            "forcar_renovacao": "/cron"
-        }
+        "servico": "Auto-Renovador IPTV Multi-Dispositivo (TV Box + Celular)",
+        "tv_box": {
+            "usuario_ativo": creds_tv.get("username", "N/A"),
+            "atualizado_em": creds_tv.get("updated_at") or creds_tv.get("generated_at") or "N/A",
+            "lista_canais": "/canais_tv.m3u",
+            "lista_completa": "/completa_tv.m3u",
+            "lista_legada_brasil": "/canais_brasil.m3u"
+        },
+        "celular": {
+            "usuario_ativo": creds_cel.get("username", "N/A"),
+            "atualizado_em": creds_cel.get("updated_at") or creds_cel.get("generated_at") or "N/A",
+            "lista_canais": "/canais_celular.m3u",
+            "lista_completa": "/completa_celular.m3u"
+        },
+        "guia_epg": "/epg.xml",
+        "forcar_renovacao": "/cron"
     })
 
 @app.route('/cron')
@@ -172,7 +195,7 @@ def home():
 @app.route('/forcar')
 @app.route('/simular')
 def trigger_cron():
-    """Endpoint chamado pelo cron-job.org ou manualmente para forçar/simular"""
+    """Endpoint chamado pelo cron-job.org ou manualmente para renovação de ambas as contas"""
     global IS_RUNNING
     if IS_RUNNING:
         return Response("BUSY (Ja existe uma renovacao em andamento)", mimetype="text/plain", status=200)
@@ -180,60 +203,65 @@ def trigger_cron():
     is_force = request.path in ['/forcar', '/simular'] or request.args.get('force') in ['1', 'true', 'sim']
 
     def run_worker():
-        global IS_RUNNING, _CACHED_CREDS, _LAST_FETCH_TIME
+        global IS_RUNNING
         with LOCK:
             IS_RUNNING = True
             try:
                 renovar.main(force=is_force)
-                # Imediatamente atualiza o cache com a nova conta gerada
-                disk_data = _fetch_from_disk()
-                if disk_data:
-                    with _CACHE_LOCK:
-                        _CACHED_CREDS = disk_data
-                        _LAST_FETCH_TIME = time.time()
+                # Imediatamente atualiza os caches em RAM para ambos os aparelhos
+                for dev in ['tv', 'celular']:
+                    fname = f"creds_{dev}.json"
+                    disk_d = _fetch_from_disk(fname)
+                    if disk_d:
+                        with _CACHE_LOCK:
+                            _CACHED_CREDS[dev] = disk_d
+                            _LAST_FETCH_TIME[dev] = time.time()
             except Exception as e:
                 print(f"[Cron Error] {e}", flush=True)
             finally:
                 IS_RUNNING = False
 
     threading.Thread(target=run_worker, daemon=True).start()
-    msg = "SIMULACAO FORCADA INICIADA" if is_force else "OK"
+    msg = "RENOVACAO MULTI-DISPOSITIVO INICIADA" if is_force else "OK"
     return Response(msg, mimetype="text/plain", status=200)
 
+# =========================================================================
+# ROTAS DE LISTAS M3U
+# =========================================================================
+
+# 1. TV BOX (Mantém 100% de compatibilidade com os links já configurados na TV)
+@app.route('/canais_tv.m3u')
+@app.route('/canais_tv.m3u8')
 @app.route('/canais_brasil.m3u')
 @app.route('/canais.m3u')
 @app.route('/canais_brasil.m3u8')
 @app.route('/canais.m3u8')
-def get_canais_inteligente():
-    """Entrega a lista com links dinâmicos eternos (/live/<id>.ts)"""
-    # 1. Se o arquivo pré-gerado com links neutros existir, entrega com suporte a streaming
-    file_target = 'canais_brasil.m3u' if os.path.exists('canais_brasil.m3u') else 'canais.m3u'
-    if os.path.exists(file_target):
-        response = send_file(file_target, mimetype='application/x-mpegURL')
-        response.headers['Access-Control-Allow-Origin'] = '*'
-        response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
-        return response
+def get_canais_tv():
+    file_target = 'canais_tv.m3u' if os.path.exists('canais_tv.m3u') else 'canais_brasil.m3u'
+    response = send_file(file_target, mimetype='application/x-mpegURL')
+    response.headers['Access-Control-Allow-Origin'] = '*'
+    response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+    return response
 
-    # 2. Fallback caso a lista ainda não esteja no disco
-    creds = carregar_credenciais()
-    user = creds.get('username')
-    pwd = creds.get('password')
-    server = creds.get('server', 'http://drd33.com')
-    if user and pwd:
-        url_universal = f"{server}/get.php?username={user}&password={pwd}&type=m3u_plus&output=ts"
-        resp = redirect(url_universal, code=302)
-        resp.headers['Access-Control-Allow-Origin'] = '*'
-        resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
-        return resp
-    return "Lista não gerada ainda.", 404
+# 2. CELULAR (Lista dedicada com links para a rota do celular)
+@app.route('/canais_celular.m3u')
+@app.route('/canais_celular.m3u8')
+def get_canais_celular():
+    file_target = 'canais_celular.m3u' if os.path.exists('canais_celular.m3u') else 'canais_brasil.m3u'
+    response = send_file(file_target, mimetype='application/x-mpegURL')
+    response.headers['Access-Control-Allow-Origin'] = '*'
+    response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+    return response
 
+# 3. LISTAS COMPLETAS (CANAIS + FILMES + SÉRIES)
+@app.route('/completa_tv.m3u')
 @app.route('/completa.m3u')
 @app.route('/lista_completa.m3u')
+@app.route('/completa_tv.m3u8')
 @app.route('/completa.m3u8')
 @app.route('/lista_completa.m3u8')
-def get_lista_completa():
-    """Entrega a lista completa oficial contendo todos os Canais, Filmes (VOD) e Séries"""
-    creds = carregar_credenciais()
+def get_completa_tv():
+    creds = carregar_credenciais('tv')
     user = creds.get('username')
     pwd = creds.get('password')
     server = creds.get('server', 'http://drd33.com').rstrip('/')
@@ -243,68 +271,118 @@ def get_lista_completa():
         resp.headers['Access-Control-Allow-Origin'] = '*'
         resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
         return resp
-    return "Nenhuma conta ativa para gerar a lista completa.", 503
+    return "Nenhuma conta TV ativa para gerar a lista completa.", 503
+
+@app.route('/completa_celular.m3u')
+@app.route('/completa_celular.m3u8')
+def get_completa_celular():
+    creds = carregar_credenciais('celular')
+    user = creds.get('username')
+    pwd = creds.get('password')
+    server = creds.get('server', 'http://drd33.com').rstrip('/')
+    if user and pwd:
+        url_master = f"{server}/get.php?username={user}&password={pwd}&type=m3u_plus&output=ts"
+        resp = redirect(url_master, code=302)
+        resp.headers['Access-Control-Allow-Origin'] = '*'
+        resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+        return resp
+    return "Nenhuma conta Celular ativa para gerar a lista completa.", 503
 
 # =========================================================================
-# ROTAS DINÂMICAS INTELIGENTES (STREAM PROXY - NUNCA EXPIRAM)
+# ROTAS DINÂMICAS DE STREAMING (PROXY INTELIGENTE)
 # =========================================================================
 
+# Streams da TV (Mantém suporte a /live/<path> e /live/tv/<path>)
+@app.route('/live/tv/<path:stream_path>')
 @app.route('/live/<path:stream_path>')
-def proxy_live_stream(stream_path):
-    """Redireciona dinamicamente para o canal ao vivo com a credencial ativa do segundo atual (< 1ms)"""
-    creds = carregar_credenciais()
+def proxy_live_tv(stream_path):
+    creds = carregar_credenciais('tv')
     user = creds.get('username')
     pwd = creds.get('password')
     server = creds.get('server', 'http://drd33.com').rstrip('/')
     if not user or not pwd:
         return "Erro: Nenhuma conta ativa no momento", 503
-    # Redireciona 302 instantaneamente para o servidor com a conta ativa
     resp = redirect(f"{server}/{user}/{pwd}/{stream_path}", code=302)
     resp.headers['Access-Control-Allow-Origin'] = '*'
     resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
     return resp
 
-@app.route('/movie/<path:stream_path>')
-def proxy_movie_stream(stream_path):
-    """Redireciona dinamicamente para o filme com a credencial ativa"""
-    creds = carregar_credenciais()
+# Streams do Celular (/live/celular/<path>)
+@app.route('/live/celular/<path:stream_path>')
+def proxy_live_celular(stream_path):
+    creds = carregar_credenciais('celular')
     user = creds.get('username')
     pwd = creds.get('password')
     server = creds.get('server', 'http://drd33.com').rstrip('/')
     if not user or not pwd:
         return "Erro: Nenhuma conta ativa no momento", 503
+    resp = redirect(f"{server}/{user}/{pwd}/{stream_path}", code=302)
+    resp.headers['Access-Control-Allow-Origin'] = '*'
+    resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+    return resp
+
+# Filmes
+@app.route('/movie/tv/<path:stream_path>')
+@app.route('/movie/<path:stream_path>')
+def proxy_movie_tv(stream_path):
+    creds = carregar_credenciais('tv')
+    user = creds.get('username')
+    pwd = creds.get('password')
+    server = creds.get('server', 'http://drd33.com').rstrip('/')
     resp = redirect(f"{server}/movie/{user}/{pwd}/{stream_path}", code=302)
     resp.headers['Access-Control-Allow-Origin'] = '*'
     resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
     return resp
 
-@app.route('/series/<path:stream_path>')
-def proxy_series_stream(stream_path):
-    """Redireciona dinamicamente para o episódio de série com a credencial ativa"""
-    creds = carregar_credenciais()
+@app.route('/movie/celular/<path:stream_path>')
+def proxy_movie_celular(stream_path):
+    creds = carregar_credenciais('celular')
     user = creds.get('username')
     pwd = creds.get('password')
     server = creds.get('server', 'http://drd33.com').rstrip('/')
-    if not user or not pwd:
-        return "Erro: Nenhuma conta ativa no momento", 503
+    resp = redirect(f"{server}/movie/{user}/{pwd}/{stream_path}", code=302)
+    resp.headers['Access-Control-Allow-Origin'] = '*'
+    resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+    return resp
+
+# Séries
+@app.route('/series/tv/<path:stream_path>')
+@app.route('/series/<path:stream_path>')
+def proxy_series_tv(stream_path):
+    creds = carregar_credenciais('tv')
+    user = creds.get('username')
+    pwd = creds.get('password')
+    server = creds.get('server', 'http://drd33.com').rstrip('/')
     resp = redirect(f"{server}/series/{user}/{pwd}/{stream_path}", code=302)
     resp.headers['Access-Control-Allow-Origin'] = '*'
     resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
     return resp
 
+@app.route('/series/celular/<path:stream_path>')
+def proxy_series_celular(stream_path):
+    creds = carregar_credenciais('celular')
+    user = creds.get('username')
+    pwd = creds.get('password')
+    server = creds.get('server', 'http://drd33.com').rstrip('/')
+    resp = redirect(f"{server}/series/{user}/{pwd}/{stream_path}", code=302)
+    resp.headers['Access-Control-Allow-Origin'] = '*'
+    resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+    return resp
+
+# HLS Chunks Fallback
 @app.route('/hls/<path:stream_path>')
 def proxy_hls_stream(stream_path):
-    """Redireciona chunks HLS caso o player resolva o caminho relativo na raiz"""
-    creds = carregar_credenciais()
+    creds = carregar_credenciais('tv')
     server = creds.get('server', 'http://drd33.com').rstrip('/')
     resp = redirect(f"{server}/hls/{stream_path}", code=302)
     resp.headers['Access-Control-Allow-Origin'] = '*'
     resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
     return resp
 
+# EPG Guia de Programação
 @app.route('/epg.xml')
 def get_epg():
-    creds = carregar_credenciais()
+    creds = carregar_credenciais('tv')
     if creds.get('username') and creds.get('password'):
         server = creds.get('server', 'http://drd33.com').rstrip('/')
         epg_url = f"{server}/xmltv.php?username={creds['username']}&password={creds['password']}"
