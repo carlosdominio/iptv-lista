@@ -182,6 +182,7 @@ def home():
             "usuario_ativo": creds_tv.get("username", "N/A"),
             "atualizado_em": creds_tv.get("updated_at") or creds_tv.get("generated_at") or "N/A",
             "lista_canais": "/canais_tv.m3u",
+            "lista_canais_hls_anti_travamento": "/canais_tv.m3u8",
             "lista_completa": "/completa_tv.m3u",
             "lista_legada_brasil": "/canais_brasil.m3u"
         },
@@ -189,6 +190,7 @@ def home():
             "usuario_ativo": creds_cel.get("username", "N/A"),
             "atualizado_em": creds_cel.get("updated_at") or creds_cel.get("generated_at") or "N/A",
             "lista_canais": "/canais_celular.m3u",
+            "lista_canais_hls_anti_travamento": "/canais_celular.m3u8",
             "lista_completa": "/completa_celular.m3u"
         },
         "guia_epg": "/epg.xml",
@@ -236,11 +238,8 @@ def trigger_cron():
 
 # 1. TV BOX (Mantém 100% de compatibilidade com os links já configurados na TV)
 @app.route('/canais_tv.m3u')
-@app.route('/canais_tv.m3u8')
 @app.route('/canais_brasil.m3u')
 @app.route('/canais.m3u')
-@app.route('/canais_brasil.m3u8')
-@app.route('/canais.m3u8')
 def get_canais_tv():
     file_target = 'canais_tv.m3u' if os.path.exists('canais_tv.m3u') else 'canais_brasil.m3u'
     response = send_file(file_target, mimetype='application/x-mpegURL')
@@ -248,15 +247,50 @@ def get_canais_tv():
     response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
     return response
 
+# Rota HLS (.m3u8) para TV Box (chunks adaptativos anti-travamento)
+@app.route('/canais_tv.m3u8')
+@app.route('/canais_tv_hls.m3u')
+@app.route('/canais_tv_hls.m3u8')
+@app.route('/canais_brasil.m3u8')
+@app.route('/canais.m3u8')
+def get_canais_tv_hls():
+    file_target = 'canais_tv.m3u' if os.path.exists('canais_tv.m3u') else 'canais_brasil.m3u'
+    try:
+        with open(file_target, 'r', encoding='utf-8', errors='ignore') as f:
+            content = f.read()
+        content_hls = content.replace('.ts\n', '.m3u8\n').replace('.ts\r\n', '.m3u8\r\n')
+        response = Response(content_hls, mimetype='application/x-mpegURL')
+        response.headers['Access-Control-Allow-Origin'] = '*'
+        response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+        return response
+    except Exception:
+        return send_file(file_target, mimetype='application/x-mpegURL')
+
 # 2. CELULAR (Lista dedicada com links para a rota do celular)
 @app.route('/canais_celular.m3u')
-@app.route('/canais_celular.m3u8')
 def get_canais_celular():
     file_target = 'canais_celular.m3u' if os.path.exists('canais_celular.m3u') else 'canais_brasil.m3u'
     response = send_file(file_target, mimetype='application/x-mpegURL')
     response.headers['Access-Control-Allow-Origin'] = '*'
     response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
     return response
+
+# Rota HLS (.m3u8) para Celular (chunks adaptativos anti-travamento)
+@app.route('/canais_celular.m3u8')
+@app.route('/canais_celular_hls.m3u')
+@app.route('/canais_celular_hls.m3u8')
+def get_canais_celular_hls():
+    file_target = 'canais_celular.m3u' if os.path.exists('canais_celular.m3u') else 'canais_brasil.m3u'
+    try:
+        with open(file_target, 'r', encoding='utf-8', errors='ignore') as f:
+            content = f.read()
+        content_hls = content.replace('.ts\n', '.m3u8\n').replace('.ts\r\n', '.m3u8\r\n')
+        response = Response(content_hls, mimetype='application/x-mpegURL')
+        response.headers['Access-Control-Allow-Origin'] = '*'
+        response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+        return response
+    except Exception:
+        return send_file(file_target, mimetype='application/x-mpegURL')
 
 # 3. LISTAS COMPLETAS (CANAIS + FILMES + SÉRIES)
 @app.route('/completa_tv.m3u')
@@ -306,8 +340,13 @@ def proxy_live_tv(stream_path):
     server = creds.get('server', 'http://drd33.com').rstrip('/')
     if not user or not pwd:
         return "Erro: Nenhuma conta ativa no momento", 503
-    resp = redirect(f"{server}/{user}/{pwd}/{stream_path}", code=302)
+    clean_path = stream_path.lstrip('/')
+    if clean_path.startswith('live/'):
+        clean_path = clean_path[5:]
+    resp = redirect(f"{server}/live/{user}/{pwd}/{clean_path}", code=302)
     resp.headers['Access-Control-Allow-Origin'] = '*'
+    resp.headers['Access-Control-Allow-Headers'] = '*'
+    resp.headers['Access-Control-Allow-Methods'] = 'GET, OPTIONS'
     resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
     return resp
 
@@ -319,8 +358,13 @@ def proxy_live_celular(stream_path):
     server = creds.get('server', 'http://drd33.com').rstrip('/')
     if not user or not pwd:
         return "Erro: Nenhuma conta ativa no momento", 503
-    resp = redirect(f"{server}/{user}/{pwd}/{stream_path}", code=302)
+    clean_path = stream_path.lstrip('/')
+    if clean_path.startswith('live/'):
+        clean_path = clean_path[5:]
+    resp = redirect(f"{server}/live/{user}/{pwd}/{clean_path}", code=302)
     resp.headers['Access-Control-Allow-Origin'] = '*'
+    resp.headers['Access-Control-Allow-Headers'] = '*'
+    resp.headers['Access-Control-Allow-Methods'] = 'GET, OPTIONS'
     resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
     return resp
 
