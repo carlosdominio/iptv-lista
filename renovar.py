@@ -5,7 +5,7 @@ Gera novos testes automaticamente rotacionando entre múltiplos provedores de e-
 """
 
 import urllib.request, urllib.parse, http.cookiejar
-import re, hashlib, base64, uuid, json, time, random, os, sys
+import re, hashlib, base64, uuid, json, time, random, os, sys, subprocess
 from http.cookiejar import Cookie
 from datetime import datetime, timezone
 
@@ -105,10 +105,10 @@ def get_temp_email(attempt=0):
         except Exception as e:
             log(f"Aviso: Servidor de e-mail {prov['name']} falhou ({e}). Tentando proximo...")
 
-    # 2. Fallback: temp-mail.io
+    # 2. Fallback: temp-mail.io (prioriza domínio ozsaip.com)
     try:
         req = urllib.request.Request('https://api.internal.temp-mail.io/api/v3/email/new', 
-            data=json.dumps({'min_name_length': 10, 'max_name_length': 12}).encode(),
+            data=json.dumps({'domain': 'ozsaip.com'}).encode(),
             headers={'Content-Type': 'application/json', 'User-Agent': UA})
         data = json.loads(urllib.request.urlopen(req, timeout=10).read().decode())
         email = data.get('email')
@@ -127,6 +127,27 @@ def get_temp_email(attempt=0):
 
 def generate_test(temp_email):
     log("Enviando requisicao de geracao de teste com assinatura autentica de navegador...")
+
+    # 1. Tentativa via Navegador Real Google Chrome (Puppeteer Stealth)
+    browser_script = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'browser_generator.js')
+    if os.path.exists(browser_script):
+        try:
+            log("Executando gerador via Google Chrome Real (Puppeteer)...")
+            proc = subprocess.run(['node', browser_script, temp_email], capture_output=True, text=True, timeout=65)
+            if proc.stdout:
+                for line in proc.stdout.strip().split('\n'):
+                    if line.startswith('{') and line.endswith('}'):
+                        try:
+                            parsed = json.loads(line)
+                            b_status = parsed.get('status')
+                            log(f"Resultado do Chrome: {b_status}")
+                            if b_status == 'sendok':
+                                return True
+                        except Exception:
+                            pass
+        except Exception as e:
+            log(f"Aviso na execucao do Chrome: {e}")
+
     target_urls = ['https://teste.coreplay.vc/', 'https://teste.coreplay.digital/']
     
     for attempt in range(4):
