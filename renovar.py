@@ -59,8 +59,7 @@ def get_temp_email(attempt=0):
     log(f"Criando caixa de e-mail temporaria (tentativa {attempt+1})...")
     
     first_names = ['carlos', 'marcos', 'felipe', 'rodrigo', 'pedro', 'lucas', 'bruno', 'gabriel', 'diego', 'rafael', 'andre', 'matheus', 'leonardo', 'thiago']
-    last_names = ['silva', 'santos', 'oliveira', 'souza', 'lima', 'pereira', 'costa', 'rodrigues', 'almeida', 'nascimento', 'araujo', 'melo', 'barbosa', 'ribeiro']
-    rand_user = f"{random.choice(first_names)}.{random.choice(last_names)}{random.randint(100, 999)}"
+    rand_user = f"{random.choice(first_names)}{random.randint(100000, 999999)}"
 
     # 1. Provedores Hydra (mail.gw e mail.tm)
     hydra_providers = [
@@ -75,7 +74,7 @@ def get_temp_email(attempt=0):
             p_name = prov["name"]
             p_base = prov["base"]
             
-            req = urllib.request.Request(f'{p_base}/domains', headers={'Accept': 'application/ld+json', 'User-Agent': UA})
+            req = urllib.request.Request(f'{p_base}/domains', headers={'Accept': 'application/json', 'User-Agent': UA})
             data = json.loads(urllib.request.urlopen(req, timeout=10).read().decode())
             domains = [d['domain'] for d in (data if isinstance(data, list) else data.get('hydra:member', []))]
             if not domains:
@@ -87,7 +86,7 @@ def get_temp_email(attempt=0):
 
             create_data = json.dumps({"address": email, "password": password}).encode()
             req = urllib.request.Request(f'{p_base}/accounts', data=create_data,
-                headers={'Content-Type': 'application/json', 'Accept': 'application/ld+json', 'User-Agent': UA})
+                headers={'Content-Type': 'application/json', 'Accept': 'application/json', 'User-Agent': UA})
             urllib.request.urlopen(req, timeout=10)
 
             login_data = json.dumps({"address": email, "password": password}).encode()
