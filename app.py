@@ -343,7 +343,8 @@ def proxy_live_tv(stream_path):
     clean_path = stream_path.lstrip('/')
     if clean_path.startswith('live/'):
         clean_path = clean_path[5:]
-    resp = redirect(f"{server}/live/{user}/{pwd}/{clean_path}", code=302)
+    qs = f"?{request.query_string.decode('utf-8')}" if request.query_string else ""
+    resp = redirect(f"{server}/live/{user}/{pwd}/{clean_path}{qs}", code=302)
     resp.headers['Access-Control-Allow-Origin'] = '*'
     resp.headers['Access-Control-Allow-Headers'] = '*'
     resp.headers['Access-Control-Allow-Methods'] = 'GET, OPTIONS'
@@ -361,7 +362,8 @@ def proxy_live_celular(stream_path):
     clean_path = stream_path.lstrip('/')
     if clean_path.startswith('live/'):
         clean_path = clean_path[5:]
-    resp = redirect(f"{server}/live/{user}/{pwd}/{clean_path}", code=302)
+    qs = f"?{request.query_string.decode('utf-8')}" if request.query_string else ""
+    resp = redirect(f"{server}/live/{user}/{pwd}/{clean_path}{qs}", code=302)
     resp.headers['Access-Control-Allow-Origin'] = '*'
     resp.headers['Access-Control-Allow-Headers'] = '*'
     resp.headers['Access-Control-Allow-Methods'] = 'GET, OPTIONS'
@@ -444,8 +446,11 @@ def proxy_series_legacy(stream_path):
 def proxy_hls_stream(stream_path):
     creds = carregar_credenciais('tv')
     server = creds.get('server', 'http://drd33.com').rstrip('/')
-    resp = redirect(f"{server}/hls/{stream_path}", code=302)
+    qs = f"?{request.query_string.decode('utf-8')}" if request.query_string else ""
+    resp = redirect(f"{server}/hls/{stream_path}{qs}", code=302)
     resp.headers['Access-Control-Allow-Origin'] = '*'
+    resp.headers['Access-Control-Allow-Headers'] = '*'
+    resp.headers['Access-Control-Allow-Methods'] = 'GET, OPTIONS'
     resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
     return resp
 
