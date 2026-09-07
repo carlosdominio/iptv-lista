@@ -10,6 +10,13 @@ from http.cookiejar import Cookie
 from datetime import datetime, timezone
 
 UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+RELAY_URL = os.environ.get("RELAY_URL", "").strip()
+
+def get_effective_url(target_url):
+    if RELAY_URL:
+        sep = "&" if "?" in RELAY_URL else "?"
+        return f"{RELAY_URL.rstrip('/')}{sep}url={urllib.parse.quote(target_url, safe='')}"
+    return target_url
 
 def log(msg):
     print(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}", flush=True)
@@ -135,7 +142,8 @@ def generate_test(temp_email):
             cj = http.cookiejar.CookieJar()
             opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cj))
 
-            html = opener.open(urllib.request.Request(target_url,
+            fetch_url = get_effective_url(target_url)
+            html = opener.open(urllib.request.Request(fetch_url,
                 headers={'User-Agent': UA, 'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7'}),
                 timeout=15).read().decode('utf-8', errors='ignore')
 
@@ -199,7 +207,8 @@ def generate_test(temp_email):
 
             time.sleep(2)
             data = urllib.parse.urlencode(payload).encode()
-            req = urllib.request.Request(f'{target_url}gerarteste', data=data, headers={
+            submit_url = get_effective_url(f'{target_url}gerarteste')
+            req = urllib.request.Request(submit_url, data=data, headers={
                 'User-Agent': UA,
                 'Referer': target_url,
                 'Origin': target_url.rstrip('/'),
