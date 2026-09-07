@@ -345,7 +345,9 @@ def proxy_live_tv(stream_path):
         return "Erro: Nenhuma conta ativa no momento", 503
     clean_path = stream_path.lstrip('/').split('/')[-1]
     qs = f"?{request.query_string.decode('utf-8')}" if request.query_string else ""
-    resp = redirect(f"{server}/live/{user}/{pwd}/{clean_path}{qs}", code=302)
+    
+    # Redireciona diretamente para a rota nativa do CorePlay (sem /live/ extra)
+    resp = redirect(f"{server}/{user}/{pwd}/{clean_path}{qs}", code=302)
     resp.headers['Access-Control-Allow-Origin'] = '*'
     resp.headers['Access-Control-Allow-Headers'] = '*'
     resp.headers['Access-Control-Allow-Methods'] = 'GET, OPTIONS'
@@ -362,7 +364,9 @@ def proxy_live_celular(stream_path):
         return "Erro: Nenhuma conta ativa no momento", 503
     clean_path = stream_path.lstrip('/').split('/')[-1]
     qs = f"?{request.query_string.decode('utf-8')}" if request.query_string else ""
-    resp = redirect(f"{server}/live/{user}/{pwd}/{clean_path}{qs}", code=302)
+    
+    # Redireciona diretamente para a rota nativa do CorePlay (sem /live/ extra)
+    resp = redirect(f"{server}/{user}/{pwd}/{clean_path}{qs}", code=302)
     resp.headers['Access-Control-Allow-Origin'] = '*'
     resp.headers['Access-Control-Allow-Headers'] = '*'
     resp.headers['Access-Control-Allow-Methods'] = 'GET, OPTIONS'
