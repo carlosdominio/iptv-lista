@@ -405,7 +405,8 @@ def xtream_player_api():
                 "is_trial": "0",
                 "active_cons": "0",
                 "max_connections": "3",
-                "allowed_output_formats": ["m3u8", "ts", "rtmp"]
+                "allowed_output_formats": ["m3u8", "ts", "rtmp"],
+                "default_output_format": "m3u8"
             },
             "server_info": {
                 "url": host_header.split(':')[0],
@@ -449,6 +450,14 @@ def xtream_player_api():
         req = urllib.request.Request(effective_target, headers={'User-Agent': 'Mozilla/5.0'})
         with urllib.request.urlopen(req, timeout=12) as r:
             content = r.read()
+            if action == 'get_live_streams' and len(content) > 10:
+                try:
+                    streams = json.loads(content.decode('utf-8'))
+                    for st in streams:
+                        st['container_extension'] = 'm3u8'
+                    content = json.dumps(streams).encode('utf-8')
+                except Exception as je:
+                    print(f"[Xtream m3u8 Injection Error] {je}", flush=True)
             if len(content) > 10:
                 _XTREAM_CACHE[cache_key] = (now_t, content)
             resp = Response(content, mimetype="application/json")
