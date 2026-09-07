@@ -2,7 +2,7 @@ import os, json, threading, time, base64
 from datetime import datetime, timezone
 from flask import Flask, Response, jsonify, redirect, request, send_file
 import renovar
-import urllib.request
+import urllib.request, urllib.parse
 
 # =========================================================================
 # CACHE EM MEMÓRIA RAM MULTI-DISPOSITIVO (TV BOX + CELULAR)
@@ -443,11 +443,13 @@ def xtream_player_api():
         req = urllib.request.Request(target_url, headers={'User-Agent': 'IPTVSmartersPlayer'})
         with urllib.request.urlopen(req, timeout=12) as r:
             content = r.read()
-            _XTREAM_CACHE[cache_key] = (now_t, content)
+            if len(content) > 10:
+                _XTREAM_CACHE[cache_key] = (now_t, content)
             resp = Response(content, mimetype="application/json")
             resp.headers['Access-Control-Allow-Origin'] = '*'
             return resp
     except Exception as e:
+        print(f"[Xtream Proxy Error] {e}", flush=True)
         return jsonify([])
 
 # Rota Legada e Xtream Codes /live/<stream_path>
