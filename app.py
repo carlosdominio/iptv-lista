@@ -12,6 +12,8 @@ _LAST_FETCH_TIME = {'tv': 0, 'celular': 0}
 _CACHE_LOCK = threading.Lock()
 _CACHE_TTL = 60  # Recalibra a cada 60 segundos em segundo plano
 _IS_FETCHING = {'tv': False, 'celular': False}
+_XTREAM_CACHE = {}
+_XTREAM_CACHE_TTL = 300 # 5 minutos de cache em memória para a API Xtream Codes
 
 def is_cred_valid(data):
     """Verifica se os dados da credencial possuem campos e estrutura minimamente validos"""
@@ -370,9 +372,93 @@ def proxy_live_celular(stream_path):
     resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
     return resp
 
-# Rota Legada /live/<stream_path> (Redireciona para a TV mantendo compatibilidade retroativa)
+# =========================================================================
+# XTREAM CODES API PROXY (COMPATIBILIDADE TOTAL COM TIVIMATE, SMARTERS, ETC)
+# =========================================================================
+@app.route('/player_api.php', methods=['GET', 'POST'])
+def xtream_player_api():
+    """Proxy Inteligente da API Xtream Codes para login fixo e renovação automática"""
+    user_in = request.args.get('username') or request.form.get('username') or 'tv'
+    pass_in = request.args.get('password') or request.form.get('password') or '123'
+    action = request.args.get('action') or request.form.get('action')
+
+    dev = 'celular' if 'celular' in user_in.lower() else 'tv'
+    creds = carregar_credenciais(dev)
+    server = creds.get('server', 'http://drd33.com').rstrip('/')
+    cp_user = creds.get('username')
+    cp_pass = creds.get('password')
+
+    # 1. Sem action: Autenticação do Player
+    if not action:
+        host_header = request.host
+        is_https = request.is_secure or request.headers.get('X-Forwarded-Proto') == 'https'
+        port = "443" if is_https else "80"
+        auth_data = {
+            "user_info": {
+                "username": user_in,
+                "password": pass_in,
+                "message": f"Conectado ao Proxy Xtream Codes ({dev.upper()})",
+                "auth": 1,
+                "status": "Active",
+                "exp_date": "1999999999", # Válido até ano 2033
+                "is_trial": "0",
+                "active_cons": "0",
+                "max_connections": "3",
+                "allowed_output_formats": ["m3u8", "ts", "rtmp"]
+            },
+            "server_info": {
+                "url": host_header.split(':')[0],
+                "port": port,
+                "https_port": "443",
+                "server_protocol": "https" if is_https else "http",
+                "rtmp_port": "8880",
+                "timezone": "America/Sao_Paulo",
+                "time_now": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            }
+        }
+        resp = jsonify(auth_data)
+        resp.headers['Access-Control-Allow-Origin'] = '*'
+        return resp
+
+    # 2. Com action: Repassa para o servidor CorePlay com credenciais ativas
+    if not cp_user or not cp_pass:
+        return jsonify([])
+
+    qs_str = request.query_string.decode('utf-8')
+    cache_key = (dev, action, qs_str)
+    now_t = time.time()
+    if cache_key in _XTREAM_CACHE:
+        cached_t, cached_resp = _XTREAM_CACHE[cache_key]
+        if now_t - cached_t < _XTREAM_CACHE_TTL:
+            resp = Response(cached_resp, mimetype="application/json")
+            resp.headers['Access-Control-Allow-Origin'] = '*'
+            return resp
+
+    qs_dict = request.args.to_dict()
+    qs_dict['username'] = cp_user
+    qs_dict['password'] = cp_pass
+    target_url = f"{server}/player_api.php?{urllib.parse.urlencode(qs_dict)}"
+
+    try:
+        req = urllib.request.Request(target_url, headers={'User-Agent': 'IPTVSmartersPlayer'})
+        with urllib.request.urlopen(req, timeout=12) as r:
+            content = r.read()
+            _XTREAM_CACHE[cache_key] = (now_t, content)
+            resp = Response(content, mimetype="application/json")
+            resp.headers['Access-Control-Allow-Origin'] = '*'
+            return resp
+    except Exception as e:
+        return jsonify([])
+
+# Rota Legada e Xtream Codes /live/<stream_path>
 @app.route('/live/<path:stream_path>')
 def proxy_live_legacy(stream_path):
+    parts = stream_path.strip('/').split('/')
+    if len(parts) >= 3:
+        user_param = parts[0].lower()
+        dev = 'celular' if 'celular' in user_param else 'tv'
+        file_part = parts[-1]
+        return proxy_live_celular(file_part) if dev == 'celular' else proxy_live_tv(file_part)
     if stream_path.startswith('celular/'):
         return proxy_live_celular(stream_path[8:])
     if stream_path.startswith('tv/'):
@@ -404,6 +490,12 @@ def proxy_movie_celular(stream_path):
 
 @app.route('/movie/<path:stream_path>')
 def proxy_movie_legacy(stream_path):
+    parts = stream_path.strip('/').split('/')
+    if len(parts) >= 3:
+        user_param = parts[0].lower()
+        dev = 'celular' if 'celular' in user_param else 'tv'
+        file_part = parts[-1]
+        return proxy_movie_celular(file_part) if dev == 'celular' else proxy_movie_tv(file_part)
     if stream_path.startswith('celular/'):
         return proxy_movie_celular(stream_path[8:])
     if stream_path.startswith('tv/'):
@@ -435,6 +527,12 @@ def proxy_series_celular(stream_path):
 
 @app.route('/series/<path:stream_path>')
 def proxy_series_legacy(stream_path):
+    parts = stream_path.strip('/').split('/')
+    if len(parts) >= 3:
+        user_param = parts[0].lower()
+        dev = 'celular' if 'celular' in user_param else 'tv'
+        file_part = parts[-1]
+        return proxy_series_celular(file_part) if dev == 'celular' else proxy_series_tv(file_part)
     if stream_path.startswith('celular/'):
         return proxy_series_celular(stream_path[8:])
     if stream_path.startswith('tv/'):
