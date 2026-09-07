@@ -489,7 +489,9 @@ def proxy_movie_tv(stream_path):
     user = creds.get('username')
     pwd = creds.get('password')
     server = creds.get('server', 'http://drd33.com').rstrip('/')
-    resp = redirect(f"{server}/movie/{user}/{pwd}/{stream_path}", code=302)
+    clean_path = stream_path.lstrip('/').split('/')[-1]
+    qs = f"?{request.query_string.decode('utf-8')}" if request.query_string else ""
+    resp = redirect(f"{server}/movie/{user}/{pwd}/{clean_path}{qs}", code=302)
     resp.headers['Access-Control-Allow-Origin'] = '*'
     resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
     return resp
@@ -500,7 +502,9 @@ def proxy_movie_celular(stream_path):
     user = creds.get('username')
     pwd = creds.get('password')
     server = creds.get('server', 'http://drd33.com').rstrip('/')
-    resp = redirect(f"{server}/movie/{user}/{pwd}/{stream_path}", code=302)
+    clean_path = stream_path.lstrip('/').split('/')[-1]
+    qs = f"?{request.query_string.decode('utf-8')}" if request.query_string else ""
+    resp = redirect(f"{server}/movie/{user}/{pwd}/{clean_path}{qs}", code=302)
     resp.headers['Access-Control-Allow-Origin'] = '*'
     resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
     return resp
@@ -526,7 +530,9 @@ def proxy_series_tv(stream_path):
     user = creds.get('username')
     pwd = creds.get('password')
     server = creds.get('server', 'http://drd33.com').rstrip('/')
-    resp = redirect(f"{server}/series/{user}/{pwd}/{stream_path}", code=302)
+    clean_path = stream_path.lstrip('/').split('/')[-1]
+    qs = f"?{request.query_string.decode('utf-8')}" if request.query_string else ""
+    resp = redirect(f"{server}/series/{user}/{pwd}/{clean_path}{qs}", code=302)
     resp.headers['Access-Control-Allow-Origin'] = '*'
     resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
     return resp
@@ -537,7 +543,9 @@ def proxy_series_celular(stream_path):
     user = creds.get('username')
     pwd = creds.get('password')
     server = creds.get('server', 'http://drd33.com').rstrip('/')
-    resp = redirect(f"{server}/series/{user}/{pwd}/{stream_path}", code=302)
+    clean_path = stream_path.lstrip('/').split('/')[-1]
+    qs = f"?{request.query_string.decode('utf-8')}" if request.query_string else ""
+    resp = redirect(f"{server}/series/{user}/{pwd}/{clean_path}{qs}", code=302)
     resp.headers['Access-Control-Allow-Origin'] = '*'
     resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
     return resp
