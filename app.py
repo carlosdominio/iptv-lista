@@ -14,6 +14,7 @@ _CACHE_TTL = 60  # Recalibra a cada 60 segundos em segundo plano
 _IS_FETCHING = {'tv': False, 'celular': False}
 _XTREAM_CACHE = {}
 _XTREAM_CACHE_TTL = 300 # 5 minutos de cache em memória para a API Xtream Codes
+RELAY_URL = os.environ.get("RELAY_URL", "").strip()
 
 def is_cred_valid(data):
     """Verifica se os dados da credencial possuem campos e estrutura minimamente validos"""
@@ -438,9 +439,14 @@ def xtream_player_api():
     qs_dict['username'] = cp_user
     qs_dict['password'] = cp_pass
     target_url = f"{server}/player_api.php?{urllib.parse.urlencode(qs_dict)}"
+    if RELAY_URL:
+        sep = "&" if "?" in RELAY_URL else "?"
+        effective_target = f"{RELAY_URL.rstrip('/')}/{sep}url={urllib.parse.quote(target_url, safe='')}"
+    else:
+        effective_target = target_url
 
     try:
-        req = urllib.request.Request(target_url, headers={'User-Agent': 'IPTVSmartersPlayer'})
+        req = urllib.request.Request(effective_target, headers={'User-Agent': 'Mozilla/5.0'})
         with urllib.request.urlopen(req, timeout=12) as r:
             content = r.read()
             if len(content) > 10:
