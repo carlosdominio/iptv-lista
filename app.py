@@ -343,9 +343,7 @@ def proxy_live_tv(stream_path):
     server = creds.get('server', 'http://drd33.com').rstrip('/')
     if not user or not pwd:
         return "Erro: Nenhuma conta ativa no momento", 503
-    clean_path = stream_path.lstrip('/')
-    if clean_path.startswith('live/'):
-        clean_path = clean_path[5:]
+    clean_path = stream_path.lstrip('/').split('/')[-1]
     qs = f"?{request.query_string.decode('utf-8')}" if request.query_string else ""
     resp = redirect(f"{server}/live/{user}/{pwd}/{clean_path}{qs}", code=302)
     resp.headers['Access-Control-Allow-Origin'] = '*'
@@ -362,9 +360,7 @@ def proxy_live_celular(stream_path):
     server = creds.get('server', 'http://drd33.com').rstrip('/')
     if not user or not pwd:
         return "Erro: Nenhuma conta ativa no momento", 503
-    clean_path = stream_path.lstrip('/')
-    if clean_path.startswith('live/'):
-        clean_path = clean_path[5:]
+    clean_path = stream_path.lstrip('/').split('/')[-1]
     qs = f"?{request.query_string.decode('utf-8')}" if request.query_string else ""
     resp = redirect(f"{server}/live/{user}/{pwd}/{clean_path}{qs}", code=302)
     resp.headers['Access-Control-Allow-Origin'] = '*'
