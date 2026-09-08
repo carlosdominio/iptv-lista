@@ -242,18 +242,44 @@ def trigger_cron():
 # ROTAS DE LISTAS M3U
 # =========================================================================
 
-# 1. TV BOX (Mantém 100% de compatibilidade com os links já configurados na TV)
+def gerar_playlist_direta(file_target, device='tv', is_hls=False):
+    """Lê o arquivo M3U e injeta links DIRETOS para o provedor, eliminando qualquer proxy de vídeo."""
+    try:
+        with open(file_target, 'r', encoding='utf-8', errors='ignore') as f:
+            content = f.read()
+    except Exception:
+        content = ""
+
+    if is_hls:
+        content = content.replace('.ts\n', '.m3u8\n').replace('.ts\r\n', '.m3u8\r\n')
+
+    creds = carregar_credenciais(device)
+    user = creds.get('username')
+    pwd = creds.get('password')
+    server = creds.get('server', 'http://pro.business-cloud-8.ru').rstrip('/')
+
+    if user and pwd:
+        route_prefix = "/live" if "business-cloud-8" in server else ""
+        direct_base = f"{server}{route_prefix}/{user}/{pwd}/"
+        # Substitui links diretos existentes (atualizando usuário/senha se mudar)
+        content = re.sub(r'https?://[a-zA-Z0-9\.\-]+(?::\d+)?/live/[a-zA-Z0-9_\-]+/[a-zA-Z0-9_\-]+/', direct_base, content)
+        # Substitui links legados de proxy Fly (/live/tv/ ou /live/celular/)
+        content = re.sub(r'https?://[a-zA-Z0-9\.\-]+(?::\d+)?/live/(?:tv|celular)/', direct_base, content)
+
+    response = Response(content, mimetype='application/x-mpegURL')
+    response.headers['Access-Control-Allow-Origin'] = '*'
+    response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+    return response
+
+# 1. TV BOX (Mantém 100% de compatibilidade com links diretos sem proxy)
 @app.route('/canais_tv.m3u')
 @app.route('/canais_brasil.m3u')
 @app.route('/canais.m3u')
 def get_canais_tv():
     file_target = 'canais_tv.m3u' if os.path.exists('canais_tv.m3u') else 'canais_brasil.m3u'
-    response = send_file(file_target, mimetype='application/x-mpegURL')
-    response.headers['Access-Control-Allow-Origin'] = '*'
-    response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
-    return response
+    return gerar_playlist_direta(file_target, device='tv', is_hls=False)
 
-# Rota HLS (.m3u8) para TV Box (chunks adaptativos anti-travamento)
+# Rota HLS (.m3u8) para TV Box (chunks adaptativos anti-travamento direto da fonte)
 @app.route('/canais_tv.m3u8')
 @app.route('/canais_tv_hls.m3u')
 @app.route('/canais_tv_hls.m3u8')
@@ -261,42 +287,21 @@ def get_canais_tv():
 @app.route('/canais.m3u8')
 def get_canais_tv_hls():
     file_target = 'canais_tv.m3u' if os.path.exists('canais_tv.m3u') else 'canais_brasil.m3u'
-    try:
-        with open(file_target, 'r', encoding='utf-8', errors='ignore') as f:
-            content = f.read()
-        content_hls = content.replace('.ts\n', '.m3u8\n').replace('.ts\r\n', '.m3u8\r\n')
-        response = Response(content_hls, mimetype='application/x-mpegURL')
-        response.headers['Access-Control-Allow-Origin'] = '*'
-        response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
-        return response
-    except Exception:
-        return send_file(file_target, mimetype='application/x-mpegURL')
+    return gerar_playlist_direta(file_target, device='tv', is_hls=True)
 
-# 2. CELULAR (Lista dedicada com links para a rota do celular)
+# 2. CELULAR (Lista dedicada com links diretos para celular)
 @app.route('/canais_celular.m3u')
 def get_canais_celular():
     file_target = 'canais_celular.m3u' if os.path.exists('canais_celular.m3u') else 'canais_brasil.m3u'
-    response = send_file(file_target, mimetype='application/x-mpegURL')
-    response.headers['Access-Control-Allow-Origin'] = '*'
-    response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
-    return response
+    return gerar_playlist_direta(file_target, device='celular', is_hls=False)
 
-# Rota HLS (.m3u8) para Celular (chunks adaptativos anti-travamento)
+# Rota HLS (.m3u8) para Celular (chunks adaptativos anti-travamento direto da fonte)
 @app.route('/canais_celular.m3u8')
 @app.route('/canais_celular_hls.m3u')
 @app.route('/canais_celular_hls.m3u8')
 def get_canais_celular_hls():
     file_target = 'canais_celular.m3u' if os.path.exists('canais_celular.m3u') else 'canais_brasil.m3u'
-    try:
-        with open(file_target, 'r', encoding='utf-8', errors='ignore') as f:
-            content = f.read()
-        content_hls = content.replace('.ts\n', '.m3u8\n').replace('.ts\r\n', '.m3u8\r\n')
-        response = Response(content_hls, mimetype='application/x-mpegURL')
-        response.headers['Access-Control-Allow-Origin'] = '*'
-        response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
-        return response
-    except Exception:
-        return send_file(file_target, mimetype='application/x-mpegURL')
+    return gerar_playlist_direta(file_target, device='celular', is_hls=True)
 
 # 3. LISTAS COMPLETAS (CANAIS + FILMES + SÉRIES)
 @app.route('/completa_tv.m3u')

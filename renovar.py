@@ -362,7 +362,7 @@ def sync_to_github():
         git config user.name "IPTV Cloud Bot"
         git config user.email "bot@render.com"
         git remote set-url origin "{remote_url}" 2>/dev/null || git remote add origin "{remote_url}"
-        git add creds.json creds_tv.json creds_celular.json canais_tv.m3u canais_celular.m3u
+        git add creds.json creds_tv.json creds_celular.json canais_tv.m3u canais_celular.m3u canais_brasil.m3u canais.m3u
         git commit -m "Auto-sincronizacao multi-contas: $(date -u '+%Y-%m-%d %H:%M:%S UTC')" || true
         git pull --rebase origin main 2>/dev/null || true
         git push --force origin main
@@ -424,8 +424,46 @@ def generate_one_account(device_label):
             else:
                 raise e
 
+def update_m3u_files():
+    """Atualiza as listas .m3u no disco com as credenciais ativas diretas sem proxy"""
+    try:
+        if os.path.exists('creds_tv.json'):
+            with open('creds_tv.json') as f:
+                tv = json.load(f)
+            u_tv, p_tv = tv.get('username'), tv.get('password')
+            s_tv = tv.get('server', 'http://pro.business-cloud-8.ru').rstrip('/')
+            if u_tv and p_tv:
+                prefix = "/live" if "business-cloud-8" in s_tv else ""
+                dir_base = f"{s_tv}{prefix}/{u_tv}/{p_tv}/"
+                for fn in ['canais_tv.m3u', 'canais_brasil.m3u', 'canais.m3u']:
+                    if os.path.exists(fn):
+                        with open(fn, 'r', encoding='utf-8', errors='ignore') as f:
+                            c = f.read()
+                        c = re.sub(r'https?://[a-zA-Z0-9\.\-]+(?::\d+)?/live/[a-zA-Z0-9_\-]+/[a-zA-Z0-9_\-]+/', dir_base, c)
+                        c = re.sub(r'https?://[a-zA-Z0-9\.\-]+(?::\d+)?/live/(?:tv|celular)/', dir_base, c)
+                        with open(fn, 'w', encoding='utf-8') as f:
+                            f.write(c)
+        if os.path.exists('creds_celular.json'):
+            with open('creds_celular.json') as f:
+                cel = json.load(f)
+            u_cel, p_cel = cel.get('username'), cel.get('password')
+            s_cel = cel.get('server', 'http://pro.business-cloud-8.ru').rstrip('/')
+            if u_cel and p_cel:
+                prefix = "/live" if "business-cloud-8" in s_cel else ""
+                dir_base = f"{s_cel}{prefix}/{u_cel}/{p_cel}/"
+                if os.path.exists('canais_celular.m3u'):
+                    with open('canais_celular.m3u', 'r', encoding='utf-8', errors='ignore') as f:
+                        c = f.read()
+                    c = re.sub(r'https?://[a-zA-Z0-9\.\-]+(?::\d+)?/live/[a-zA-Z0-9_\-]+/[a-zA-Z0-9_\-]+/', dir_base, c)
+                    c = re.sub(r'https?://[a-zA-Z0-9\.\-]+(?::\d+)?/live/(?:tv|celular)/', dir_base, c)
+                    with open('canais_celular.m3u', 'w', encoding='utf-8') as f:
+                        f.write(c)
+        log("✅ Listas M3U locais atualizadas com links diretos da fonte!")
+    except Exception as e:
+        log(f"Aviso ao atualizar arquivos m3u: {e}")
+
 def main(force=False):
-    log("=== Início do Processo de Auto-Renovação Multi-Dispositivo ===")
+    log("=== Iniciando Verificação de Renovação Multi-Dispositivo ===")
     
     need_tv = force or not check_active('creds_tv.json')
     need_celular = force or not check_active('creds_celular.json')
@@ -468,6 +506,7 @@ def main(force=False):
             log(f"❌ Falha ao gerar conta Celular: {e}")
 
     if updated_any:
+        update_m3u_files()
         sync_to_github()
         log("=== Processo Multi-Dispositivo Finalizado com Sucesso ===")
 
