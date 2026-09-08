@@ -346,8 +346,9 @@ def proxy_live_tv(stream_path):
     clean_path = stream_path.lstrip('/').split('/')[-1]
     qs = f"?{request.query_string.decode('utf-8')}" if request.query_string else ""
     
-    # Redireciona diretamente para a rota nativa do CorePlay (sem /live/ extra)
-    resp = redirect(f"{server}/{user}/{pwd}/{clean_path}{qs}", code=302)
+    # Redireciona diretamente para a rota nativa
+    route_prefix = "/live" if "business-cloud-8" in server else ""
+    resp = redirect(f"{server}{route_prefix}/{user}/{pwd}/{clean_path}{qs}", code=302)
     resp.headers['Access-Control-Allow-Origin'] = '*'
     resp.headers['Access-Control-Allow-Headers'] = '*'
     resp.headers['Access-Control-Allow-Methods'] = 'GET, OPTIONS'
@@ -365,8 +366,9 @@ def proxy_live_celular(stream_path):
     clean_path = stream_path.lstrip('/').split('/')[-1]
     qs = f"?{request.query_string.decode('utf-8')}" if request.query_string else ""
     
-    # Redireciona diretamente para a rota nativa do CorePlay (sem /live/ extra)
-    resp = redirect(f"{server}/{user}/{pwd}/{clean_path}{qs}", code=302)
+    # Redireciona diretamente para a rota nativa
+    route_prefix = "/live" if "business-cloud-8" in server else ""
+    resp = redirect(f"{server}{route_prefix}/{user}/{pwd}/{clean_path}{qs}", code=302)
     resp.headers['Access-Control-Allow-Origin'] = '*'
     resp.headers['Access-Control-Allow-Headers'] = '*'
     resp.headers['Access-Control-Allow-Methods'] = 'GET, OPTIONS'
@@ -450,14 +452,57 @@ def xtream_player_api():
         req = urllib.request.Request(effective_target, headers={'User-Agent': 'Mozilla/5.0'})
         with urllib.request.urlopen(req, timeout=12) as r:
             content = r.read()
-            if action == 'get_live_streams' and len(content) > 10:
+            # Filtro inteligente de categorias e canais do Brasil
+            if action in ['get_live_categories', 'get_vod_categories', 'get_series_categories'] and len(content) > 10:
+                try:
+                    cats = json.loads(content.decode('utf-8'))
+                    if isinstance(cats, list):
+                        filtered_cats = [
+                            c for c in cats 
+                            if any(x in (c.get('category_name') or '').lower() for x in ['br|', 'br:', 'br -', 'brasil', 'brazil', 'pt/br', 'dublado', 'nacional'])
+                        ]
+                        content = json.dumps(filtered_cats).encode('utf-8')
+                except Exception as je:
+                    print(f"[Filter Categories Error] {je}", flush=True)
+
+            elif action == 'get_live_streams' and len(content) > 10:
                 try:
                     streams = json.loads(content.decode('utf-8'))
-                    for st in streams:
-                        st['container_extension'] = 'm3u8'
-                    content = json.dumps(streams).encode('utf-8')
+                    if isinstance(streams, list):
+                        if not request.args.get('category_id'):
+                            streams = [
+                                s for s in streams
+                                if any(x in (s.get('name') or '').lower() for x in ['br:', 'br|', 'br -', 'brasil', 'brazil'])
+                            ]
+                        for st in streams:
+                            st['container_extension'] = 'ts'
+                        content = json.dumps(streams).encode('utf-8')
                 except Exception as je:
-                    print(f"[Xtream m3u8 Injection Error] {je}", flush=True)
+                    print(f"[Xtream Streams Error] {je}", flush=True)
+
+            elif action == 'get_vod_streams' and not request.args.get('category_id') and len(content) > 10:
+                try:
+                    streams = json.loads(content.decode('utf-8'))
+                    if isinstance(streams, list):
+                        streams = [
+                            s for s in streams
+                            if any(x in (s.get('name') or '').lower() for x in ['pt -', 'pt/br', 'dublado', 'nacional', 'br:'])
+                        ]
+                        content = json.dumps(streams).encode('utf-8')
+                except Exception as je:
+                    print(f"[Filter VOD Error] {je}", flush=True)
+
+            elif action == 'get_series' and not request.args.get('category_id') and len(content) > 10:
+                try:
+                    series = json.loads(content.decode('utf-8'))
+                    if isinstance(series, list):
+                        series = [
+                            s for s in series
+                            if any(x in (s.get('name') or '').lower() for x in ['pt -', 'pt/br', 'dublado', 'nacional', 'br:'])
+                        ]
+                        content = json.dumps(series).encode('utf-8')
+                except Exception as je:
+                    print(f"[Filter Series Error] {je}", flush=True)
             if len(content) > 10:
                 _XTREAM_CACHE[cache_key] = (now_t, content)
             resp = Response(content, mimetype="application/json")
