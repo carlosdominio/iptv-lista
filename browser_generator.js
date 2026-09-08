@@ -15,6 +15,7 @@ async function submitTrial(email, targetUrl = 'https://teste.coreplay.vc/') {
       '--no-sandbox',
       '--disable-setuid-sandbox',
       '--disable-dev-shm-usage',
+      '--disable-gpu',
       '--disable-blink-features=AutomationControlled',
       '--incognito',
       '--lang=pt-BR,pt'

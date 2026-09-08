@@ -369,6 +369,37 @@ def sync_to_github():
     except Exception as e:
         log(f"Aviso no git sync: {e}")
 
+def restart_fly_machines():
+    """Reinicia as máquinas no Fly.io após gerar novas contas para limpar cache e renovar conexões"""
+    log("🔄 Resetando máquinas no Fly.io...")
+    # 1. Tentar via comando flyctl se estiver no host local
+    try:
+        res = subprocess.run(["fly", "apps", "restart", "iptv-lista-carlos"], capture_output=True, text=True, timeout=60)
+        if res.returncode == 0:
+            log("✅ Máquinas reiniciadas com sucesso via flyctl!")
+            return True
+    except Exception:
+        pass
+
+    # 2. Tentar via Fly Machines API caso tenha FLY_API_TOKEN ou token de deploy
+    token = os.environ.get("FLY_API_TOKEN") or "FlyV1 fm2_lJPECAAAAAAAGATbxBAJfxAh3TRTH8RG0MbFUgwNwrVodHRwczovL2FwaS5mbHkuaW8vdjGWAJLOAB0MCh8Lk7lodHRwczovL2FwaS5mbHkuaW8vYWFhL3YxxDybbrPc2W5GsKe22JiywqLz9QG4JWo/O66u90U77s+c72DzNHEH28S/ES77I8Vj+uoX5l0Hq0TVrSCdYiDETu4A6gv8SIL12QJjKOYhcuNSRu7zEDPnATFEL3SCqGZmpG5zJitllqYgc+VcPc/69nf6iDFwV+9Qqk2TC6LuhXZFxXb91zmmVNgy7z3VgA2SlAORgc4BgTjWHwWRgqdidWlsZGVyH6J3Zx8BxCBfZyM4RuHU4TjqaMJVqpB4p5uEfewEM0JT/YTdO4JMhQ==,fm2_lJPETu4A6gv8SIL12QJjKOYhcuNSRu7zEDPnATFEL3SCqGZmpG5zJitllqYgc+VcPc/69nf6iDFwV+9Qqk2TC6LuhXZFxXb91zmmVNgy7z3VgMQQdiaGCOV6VyrdtZfuYSHRbMO5aHR0cHM6Ly9hcGkuZmx5LmlvL2FhYS92MZgEks5qn+3jzpA39AEXzgAbynMKkc4AG8pzDMQQgQcPOfFlad1D46BaQKazqsQg1i3JJILvxjAIRqgxhEBaOuVVPV3tnBn2Xr60cbvUGEg="
+    app_name = os.environ.get("FLY_APP_NAME", "iptv-lista-carlos")
+    try:
+        url_list = f"https://api.machines.dev/v1/apps/{app_name}/machines"
+        req = urllib.request.Request(url_list, headers={"Authorization": f"Bearer {token}"})
+        with urllib.request.urlopen(req, timeout=10) as r:
+            machines = json.loads(r.read().decode())
+        for m in machines:
+            m_id = m['id']
+            url_restart = f"https://api.machines.dev/v1/apps/{app_name}/machines/{m_id}/restart"
+            r_req = urllib.request.Request(url_restart, data=b"", headers={"Authorization": f"Bearer {token}"})
+            urllib.request.urlopen(r_req, timeout=10)
+        log("✅ Máquinas reiniciadas com sucesso via Machines API!")
+        return True
+    except Exception as e:
+        log(f"Aviso ao reiniciar via Machines API: {e}")
+    return False
+
 def generate_one_account(device_label):
     """Gera uma conta de teste individual com fingerprint e e-mail únicos"""
     log(f"--> Iniciando geração para: {device_label.upper()}...")
@@ -432,6 +463,7 @@ def main(force=False):
 
     if updated_any:
         sync_to_github()
+        restart_fly_machines()
         log("=== Processo Multi-Dispositivo Finalizado com Sucesso ===")
 
 if __name__ == '__main__':
