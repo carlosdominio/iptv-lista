@@ -456,6 +456,50 @@ def xtream_player_api():
             resp.headers['Access-Control-Allow-Origin'] = '*'
             return resp
 
+    # 2.1 Atalho ultra-otimizado para VOD sem category_id (evita baixar 100.000 filmes e estourar memoria)
+    if action == 'get_vod_streams' and not request.args.get('category_id'):
+        try:
+            br_vod_cats = ['133', '848']
+            all_vod = []
+            for vcat in br_vod_cats:
+                try:
+                    v_url = f"{server}/player_api.php?username={cp_user}&password={cp_pass}&action=get_vod_streams&category_id={vcat}"
+                    with urllib.request.urlopen(urllib.request.Request(v_url, headers={'User-Agent': 'Mozilla/5.0'}), timeout=8) as vr:
+                        all_vod.extend(json.loads(vr.read().decode('utf-8')))
+                except Exception as ve:
+                    print(f"[VOD Fetch Cat {vcat} Error] {ve}", flush=True)
+            content = json.dumps(all_vod).encode('utf-8')
+            if len(content) > 10:
+                _XTREAM_CACHE[cache_key] = (now_t, content)
+            resp = Response(content, mimetype="application/json")
+            resp.headers['Access-Control-Allow-Origin'] = '*'
+            return resp
+        except Exception as e:
+            print(f"[VOD Stream Error] {e}", flush=True)
+            return jsonify([])
+
+    # 2.2 Atalho ultra-otimizado para Séries sem category_id (evita baixar séries globais desnecessárias)
+    if action == 'get_series' and not request.args.get('category_id'):
+        try:
+            br_series_cats = ['1889', '857', '851', '853', '852', '854', '864', '1341', '1397', '1407', '1349', '1370', '855', '2031']
+            all_series = []
+            for scat in br_series_cats:
+                try:
+                    s_url = f"{server}/player_api.php?username={cp_user}&password={cp_pass}&action=get_series&category_id={scat}"
+                    with urllib.request.urlopen(urllib.request.Request(s_url, headers={'User-Agent': 'Mozilla/5.0'}), timeout=5) as sr:
+                        all_series.extend(json.loads(sr.read().decode('utf-8')))
+                except Exception:
+                    pass
+            content = json.dumps(all_series).encode('utf-8')
+            if len(content) > 10:
+                _XTREAM_CACHE[cache_key] = (now_t, content)
+            resp = Response(content, mimetype="application/json")
+            resp.headers['Access-Control-Allow-Origin'] = '*'
+            return resp
+        except Exception as e:
+            print(f"[Series Error] {e}", flush=True)
+            return jsonify([])
+
     qs_dict = request.args.to_dict()
     qs_dict['username'] = cp_user
     qs_dict['password'] = cp_pass
@@ -505,30 +549,10 @@ def xtream_player_api():
                 except Exception as je:
                     print(f"[Xtream Streams Error] {je}", flush=True)
 
-            elif action == 'get_vod_streams' and not request.args.get('category_id') and len(content) > 10:
-                try:
-                    streams = json.loads(content.decode('utf-8'))
-                    if isinstance(streams, list):
-                        streams = [
-                            s for s in streams
-                            if any(x in (s.get('name') or '').lower() for x in ['pt -', 'pt/br', 'dublado', 'nacional', 'br:'])
-                        ]
-                        content = json.dumps(streams).encode('utf-8')
-                except Exception as je:
-                    print(f"[Filter VOD Error] {je}", flush=True)
-
-            elif action == 'get_series' and not request.args.get('category_id') and len(content) > 10:
-                try:
-                    series = json.loads(content.decode('utf-8'))
-                    if isinstance(series, list):
-                        series = [
-                            s for s in series
-                            if any(x in (s.get('name') or '').lower() for x in ['pt -', 'pt/br', 'dublado', 'nacional', 'br:'])
-                        ]
-                        content = json.dumps(series).encode('utf-8')
-                except Exception as je:
-                    print(f"[Filter Series Error] {je}", flush=True)
-            if len(content) > 10:
+            if len(content) > 10 and len(content) < 3 * 1024 * 1024:
+                if len(_XTREAM_CACHE) > 30:
+                    oldest = min(_XTREAM_CACHE.keys(), key=lambda k: _XTREAM_CACHE[k][0])
+                    _XTREAM_CACHE.pop(oldest, None)
                 _XTREAM_CACHE[cache_key] = (now_t, content)
             resp = Response(content, mimetype="application/json")
             resp.headers['Access-Control-Allow-Origin'] = '*'
@@ -649,10 +673,11 @@ def proxy_hls_stream(stream_path):
 
 # EPG Guia de Programação
 @app.route('/epg.xml')
+@app.route('/xmltv.php')
 def get_epg():
     creds = carregar_credenciais('tv')
     if creds.get('username') and creds.get('password'):
-        server = creds.get('server', 'http://drd33.com').rstrip('/')
+        server = creds.get('server', 'http://pro.business-cloud-8.ru').rstrip('/')
         epg_url = f"{server}/xmltv.php?username={creds['username']}&password={creds['password']}"
         resp = redirect(epg_url, code=302)
         resp.headers['Access-Control-Allow-Origin'] = '*'
