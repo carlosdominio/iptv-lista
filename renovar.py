@@ -41,13 +41,19 @@ def check_active(cred_file='creds.json'):
                 now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
                 age_seconds = (now_utc - dt).total_seconds()
                 
-                # Testes duram 4-6 horas. Se tem menos de 3.5 horas (12600s), ainda está ativo
-                if 0 <= age_seconds < 12600:
-                    remaining_min = (21600 - age_seconds) / 60
-                    log(f"[{cred_file}] Conta '{user}' gerada há {age_seconds/60:.0f} min (válida por mais ~{remaining_min:.0f} min).")
+                # Servidores de 24h (como business-cloud-8) duram 24h (86400s).
+                # Servidores antigos (CorePlay) duravam 6h (21600s).
+                is_24h = 'business-cloud-8' in creds.get('server', '')
+                total_duration = 86400 if is_24h else 21600
+                cycle_threshold = 79200 if is_24h else 12600 # 22h se for 24h; 3.5h se for 6h
+                
+                if 0 <= age_seconds < cycle_threshold:
+                    remaining_min = (total_duration - age_seconds) / 60
+                    remaining_hours = remaining_min / 60
+                    log(f"[{cred_file}] Conta '{user}' gerada há {age_seconds/60:.0f} min (válida por mais ~{remaining_hours:.1f}h / {remaining_min:.0f} min).")
                     return True
                 else:
-                    log(f"[{cred_file}] Conta '{user}' gerada há {age_seconds/60:.0f} min (atingiu o ciclo de 3.5h).")
+                    log(f"[{cred_file}] Conta '{user}' gerada há {age_seconds/60:.0f} min (atingiu o ciclo de renovação).")
                     return False
             except Exception as e:
                 log(f"Aviso ao calcular tempo da conta em {cred_file}: {e}")

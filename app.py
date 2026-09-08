@@ -22,10 +22,13 @@ def is_cred_valid(data):
         return False
     return bool(data.get('username') and data.get('password'))
 
-def is_cred_fresh(data, max_age=12600):
-    """Verifica se a credencial foi gerada ha menos de 3.5 horas (ciclo ideal de renovacao)"""
+def is_cred_fresh(data, max_age=None):
+    """Verifica se a credencial foi gerada dentro do ciclo ideal de renovacao"""
     if not is_cred_valid(data):
         return False
+    is_24h = 'business-cloud-8' in data.get('server', '')
+    if max_age is None:
+        max_age = 79200 if is_24h else 12600 # 22h se for 24h, ou 3.5h se for 6h
     ts_str = data.get('updated_at') or data.get('generated_at')
     if not ts_str:
         return True
