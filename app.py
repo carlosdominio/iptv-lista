@@ -349,6 +349,11 @@ def proxy_live_tv(stream_path):
     clean_path = stream_path.lstrip('/').split('/')[-1]
     qs = f"?{request.query_string.decode('utf-8')}" if request.query_string else ""
     
+    # Bloqueia canais com tela preta / sem transmissão
+    DEAD_IDS = {'1979186', '1979185', '1979184', '1979183', '1979182', '1979181', '1979180', '1979179', '1549668', '1549667', '1549666', '1549665', '1549664', '1549663', '439343', '439340', '439338', '439336', '439330', '439329', '439324'}
+    if clean_path.split('.')[0] in DEAD_IDS:
+        return "Canal temporariamente fora do ar (sem transmissao)", 404
+
     # Redireciona diretamente para a rota nativa
     route_prefix = "/live" if "business-cloud-8" in server else ""
     resp = redirect(f"{server}{route_prefix}/{user}/{pwd}/{clean_path}{qs}", code=302)
@@ -369,6 +374,11 @@ def proxy_live_celular(stream_path):
     clean_path = stream_path.lstrip('/').split('/')[-1]
     qs = f"?{request.query_string.decode('utf-8')}" if request.query_string else ""
     
+    # Bloqueia canais com tela preta / sem transmissão
+    DEAD_IDS = {'1979186', '1979185', '1979184', '1979183', '1979182', '1979181', '1979180', '1979179', '1549668', '1549667', '1549666', '1549665', '1549664', '1549663', '439343', '439340', '439338', '439336', '439330', '439329', '439324'}
+    if clean_path.split('.')[0] in DEAD_IDS:
+        return "Canal temporariamente fora do ar (sem transmissao)", 404
+
     # Redireciona diretamente para a rota nativa
     route_prefix = "/live" if "business-cloud-8" in server else ""
     resp = redirect(f"{server}{route_prefix}/{user}/{pwd}/{clean_path}{qs}", code=302)
@@ -472,6 +482,13 @@ def xtream_player_api():
                 try:
                     streams = json.loads(content.decode('utf-8'))
                     if isinstance(streams, list):
+                        # Remove canais conhecidos de tela preta / fora do ar / câmeras inativas
+                        DEAD_KEYWORDS = ['(na)', '(n/a)', 'casa do patrão', 'fazenda ']
+                        DEAD_IDS = {'1979186', '1979185', '1979184', '1979183', '1979182', '1979181', '1979180', '1979179', '1549668', '1549667', '1549666', '1549665', '1549664', '1549663', '439343', '439340', '439338', '439336', '439330', '439329', '439324'}
+                        streams = [
+                            s for s in streams
+                            if str(s.get('stream_id')) not in DEAD_IDS and not any(k in (s.get('name') or '').lower() for k in DEAD_KEYWORDS)
+                        ]
                         if not request.args.get('category_id'):
                             streams = [
                                 s for s in streams
