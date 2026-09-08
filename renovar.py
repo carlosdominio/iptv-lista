@@ -469,7 +469,6 @@ def main(force=False):
 
     if updated_any:
         sync_to_github()
-        restart_fly_machines()
         log("=== Processo Multi-Dispositivo Finalizado com Sucesso ===")
 
 if __name__ == '__main__':

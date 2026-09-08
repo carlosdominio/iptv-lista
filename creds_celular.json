@@ -1,8 +1,8 @@
 {
-  "username": "47a48bb928c6",
-  "password": "cb927871ef",
+  "username": "24583a84e000",
+  "password": "097e34c549",
   "server": "http://pro.business-cloud-8.ru",
-  "m3u_url": "http://pro.business-cloud-8.ru/get.php?username=47a48bb928c6&password=cb927871ef&type=m3u_plus&output=mpegts",
-  "updated_at": "2026-09-08T13:00:00Z",
+  "m3u_url": "http://pro.business-cloud-8.ru/get.php?username=24583a84e000&password=097e34c549&type=m3u_plus&output=mpegts",
+  "updated_at": "2026-09-08T14:06:19Z",
   "device": "celular"
 }
