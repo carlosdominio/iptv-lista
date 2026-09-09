@@ -1,8 +1,8 @@
 {
-  "username": "47a48bb928c6",
-  "password": "cb927871ef",
-  "server": "http://pro.business-cloud-8.ru",
-  "m3u_url": "http://pro.business-cloud-8.ru/get.php?username=47a48bb928c6&password=cb927871ef&type=m3u_plus&output=mpegts",
-  "updated_at": "2026-09-08T13:00:00Z",
+  "username": "94452584",
+  "password": "87834",
+  "server": "http://drd33.com",
+  "m3u_url": "http://drd33.com/playlist/94452584/87834/m3u_plus",
+  "updated_at": "2026-09-09T13:00:40Z",
   "device": "tv"
 }
